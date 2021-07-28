@@ -1,0 +1,3 @@
+[submodule "knnmt"]
+	path = knnmt
+	url = https://github.com/urvashik/knnmt
