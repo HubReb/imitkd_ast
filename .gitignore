@@ -1,0 +1,11 @@
+knnmt/wmt19.en-de.joined-dict.ensemble
+knnmt/data
+knnmt/fairseq.egg-info
+knnmt/diff_to_orig.txt
+knnmt/build
+knnmt/data-bin
+faiss/sift.tar.gz
+faiss/sift1M
+mosesdecoder/
+mosesedecoder/
+fastBPE/
