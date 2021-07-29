@@ -33,3 +33,11 @@ def test_change_format_multiple_tabs():
     test_list = ["source sentence\t\t\tnewword\t target sentence"]
     with pytest.raises(ValueError):
         source, target = change_format(test_list)
+
+def test_change_format_multiple_tabs_starts_hack():
+    test_list = ["12.\tsource sentence newword\t target sentence"]
+    source, target = change_format(test_list)
+    assert source == ["12. source sentence newword"]
+    assert target == ["target sentence"]
+
+
