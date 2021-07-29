@@ -3,6 +3,8 @@
 # email: hubert@cl.uni-heidelberg.de
 
 
+import regex as re
+
 def change_format(data):
     source, translation = [], []
     if not isinstance(data, list):
@@ -22,15 +24,17 @@ def change_format(data):
             assert source_sentence != []
             assert source_sentence != translated_sentence
             if line.split("\t")[1].strip() != "":
+                pattern = r"^1\d."
                 if (
                     "" not in line.split("\t")
                     and len(line.split("\t")) == 3
-                    and line.split("\t")[0].startswith("12.")
+                    and re.match(pattern, line.split("\t")[0])
                 ):
                     source_sentence = source_sentence + " " + line.split("\t")[1]
                 else:
+                    print(line)
                     raise ValueError("Format is broken!")
-            else:
+            elif len(line.split("\t")) > 3:
                 raise ValueError("Format is broken!")
         source_sentence = source_sentence.strip()
         translated_sentence = translated_sentence.strip()
