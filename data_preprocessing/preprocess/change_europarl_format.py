@@ -22,11 +22,6 @@ def change_format(data):
                 raise ValueError("Format is broken!")
         source_sentence = source_sentence.strip()
         translated_sentence = translated_sentence.strip()
-        if source_sentence == [] and translated_sentence == []:
-            print("warning: empty line encountered")
-            continue
-        if source_sentence == [] or translated_sentence == []:
-            raise ValueError("could not sucessfully split line - abort")
         if source_sentence not in source:
             source.append(source_sentence)
         if translated_sentence not in translation:
