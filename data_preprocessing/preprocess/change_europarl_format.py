@@ -14,12 +14,19 @@ def change_format(data):
             source_sentence, translated_sentence = line.split("\t")
         # check if we have multiple tabs
         except ValueError:
-            source_sentence, translated_sentence = line.split("\t")[0], line.split("\t")[-1]
+            source_sentence, translated_sentence = (
+                line.split("\t")[0],
+                line.split("\t")[-1],
+            )
             assert translated_sentence != []
             assert source_sentence != []
             assert source_sentence != translated_sentence
-            if line.split("\t")[1].strip() != '':
-                if "" not in line.split("\t") and len(line.split("\t")) == 3 and line.split("\t")[0].startswith("12."):
+            if line.split("\t")[1].strip() != "":
+                if (
+                    "" not in line.split("\t")
+                    and len(line.split("\t")) == 3
+                    and line.split("\t")[0].startswith("12.")
+                ):
                     source_sentence = source_sentence + " " + line.split("\t")[1]
                 else:
                     raise ValueError("Format is broken!")

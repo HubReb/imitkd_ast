@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # author: R. Hubert
-# # email: hubert@cl.uni-heidelberg.de 
+# # email: hubert@cl.uni-heidelberg.de
 
 import pytest
 
@@ -34,10 +34,9 @@ def test_change_format_multiple_tabs():
     with pytest.raises(ValueError):
         source, target = change_format(test_list)
 
+
 def test_change_format_multiple_tabs_starts_hack():
     test_list = ["12.\tsource sentence newword\t target sentence"]
     source, target = change_format(test_list)
     assert source == ["12. source sentence newword"]
     assert target == ["target sentence"]
-
-
