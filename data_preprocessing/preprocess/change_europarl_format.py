@@ -18,7 +18,12 @@ def change_format(data):
             assert translated_sentence != []
             assert source_sentence != []
             assert source_sentence != translated_sentence
-            if line.split("\t")[1] != []:
+            if line.split("\t")[1].strip() != '':
+                if "" not in line.split("\t") and len(line.split("\t")) == 3 and line.split("\t")[0].startswith("12."):
+                    source_sentence = source_sentence + " " + line.split("\t")[1]
+                else:
+                    raise ValueError("Format is broken!")
+            else:
                 raise ValueError("Format is broken!")
         source_sentence = source_sentence.strip()
         translated_sentence = translated_sentence.strip()
@@ -34,7 +39,7 @@ def change_format(data):
 
 def split_europarl_into_seperate_file_per_language(folder, filename):
     with open(f"{folder}/{filename}") as f:
-        file_content = f.read().split("\n")
+        file_content = f.read().split("\n")[:-1]
     source_language, target_language = change_format(file_content)
     language_one, language_two = filename.split(".")[-2].split("-")
     for language in (language_one, language_two):
