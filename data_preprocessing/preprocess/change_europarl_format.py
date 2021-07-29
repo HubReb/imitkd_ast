@@ -22,10 +22,13 @@ def change_format(data):
                 raise ValueError("Format is broken!")
         source_sentence = source_sentence.strip()
         translated_sentence = translated_sentence.strip()
-        if source_sentence not in source:
-            source.append(source_sentence)
-        if translated_sentence not in translation:
-            translation.append(translated_sentence)
+        source.append(source_sentence)
+        translation.append(translated_sentence)
+    non_doubled_source_sentences, non_doubled_translation_sentences = [], []
+    for source_sentence, translated_sentence in zip(source, translation):
+        if source_sentence not in non_doubled_source_sentences:
+            non_doubled_source_sentences.append(source_sentence)
+            non_doubled_translation_sentences.append(translation)
     return source, translation
 
 
