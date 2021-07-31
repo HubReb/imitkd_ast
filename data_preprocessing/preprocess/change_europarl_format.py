@@ -43,7 +43,6 @@ def change_format(data):
         source.append(source_sentence)
         translation.append(translated_sentence)
     non_doubled_source_sentences, non_doubled_translation_sentences = [], []
-    i = 0
     for source_sentence, translated_sentence in zip(source, translation):
         if source_sentence not in non_doubled_source_sentences:
             non_doubled_source_sentences.append(source_sentence)

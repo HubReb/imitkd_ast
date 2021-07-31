@@ -54,7 +54,7 @@ def split_news_into_seperate_file_per_language(folder, filename):
     language_one, language_two = filename.split(".")[-2].split("-")
     texts = (source_language, target_language)
     for i, language in enumerate((language_one, language_two)):
-        with open(f"{folder}/news-commentary-v14{language}.tsv", "w") as f:
+        with open(f"{folder}/news-commentary-v14.{language}.tsv", "w") as f:
             f.write("\n".join(texts[i]))
 
 
