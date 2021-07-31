@@ -6,7 +6,7 @@
 import regex as re
 
 
-def change_format(data):
+def change_format_news(data):
     source, translation = [], []
     if not isinstance(data, list):
         raise TypeError
@@ -24,7 +24,7 @@ def change_format(data):
             assert translated_sentence != []
             assert source_sentence != []
             assert source_sentence != translated_sentence
-            if line.split("\t")[1].strip() != "":
+            if len(line.split("\t")) > 2:
                 pattern = r"^1\d."
                 if (
                     "" not in line.split("\t")
@@ -33,16 +33,13 @@ def change_format(data):
                 ):
                     source_sentence = source_sentence + " " + line.split("\t")[1]
                 else:
-                    print(line)
-                    raise ValueError("Format is broken!")
-            elif len(line.split("\t")) > 3:
-                raise ValueError("Format is broken!")
+                    translated_sentence = " ".join(line.split("\t")[1:])
+
         source_sentence = source_sentence.strip()
         translated_sentence = translated_sentence.strip()
         source.append(source_sentence)
         translation.append(translated_sentence)
     non_doubled_source_sentences, non_doubled_translation_sentences = [], []
-    i = 0
     for source_sentence, translated_sentence in zip(source, translation):
         if source_sentence not in non_doubled_source_sentences:
             non_doubled_source_sentences.append(source_sentence)
@@ -50,20 +47,20 @@ def change_format(data):
     return non_doubled_source_sentences, non_doubled_translation_sentences
 
 
-def split_europarl_into_seperate_file_per_language(folder, filename):
+def split_news_into_seperate_file_per_language(folder, filename):
     with open(f"{folder}/{filename}") as f:
         file_content = f.read().split("\n")[:-1]
-    source_language, target_language = change_format(file_content)
+    source_language, target_language = change_format_news(file_content)
     language_one, language_two = filename.split(".")[-2].split("-")
     texts = (source_language, target_language)
     for i, language in enumerate((language_one, language_two)):
-        with open(f"{folder}/europarl-v9.{language}.tsv", "w") as f:
+        with open(f"{folder}/news-commentary-v14{language}.tsv", "w") as f:
             f.write("\n".join(texts[i]))
 
 
 if __name__ == "__main__":
     DATADIR = "/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/knnmt/data/"
-    filename = "europarl-v9.de-en.tsv"
-    split_europarl_into_seperate_file_per_language(
+    filename = "news-commentary-v14.de-en.tsv"
+    split_news_into_seperate_file_per_language(
         DATADIR, filename
     )
