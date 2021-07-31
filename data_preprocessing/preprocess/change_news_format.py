@@ -31,10 +31,10 @@ def change_format_news(data):
                     and len(line.split("\t")) == 3
                     and re.match(pattern, line.split("\t")[0])
                 ):
-                    source_sentence = source_sentence + " " + line.split("\t")[1]
+                    source_sentence = source_sentence.strip() + " " + line.split("\t")[1].strip()
                 else:
                     translated_sentence = " ".join(line.split("\t")[1:])
-
+                    translated_sentence = re.sub(r"\s\s+", " ", translated_sentence)
         source_sentence = source_sentence.strip()
         translated_sentence = translated_sentence.strip()
         source.append(source_sentence)

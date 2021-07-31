@@ -33,12 +33,13 @@ def change_format(data):
                 ):
                     source_sentence = source_sentence + " " + line.split("\t")[1]
                 else:
-                    print(line)
                     raise ValueError("Format is broken!")
             elif len(line.split("\t")) > 3:
                 raise ValueError("Format is broken!")
         source_sentence = source_sentence.strip()
+        source_sentence = re.sub(r"\s\s+", " ", source_sentence)
         translated_sentence = translated_sentence.strip()
+        translated_sentence = re.sub(r"\s\s+", " ", translated_sentence)
         source.append(source_sentence)
         translation.append(translated_sentence)
     non_doubled_source_sentences, non_doubled_translation_sentences = [], []
