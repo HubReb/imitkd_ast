@@ -6,7 +6,7 @@
 from translate.storage.tmx import tmxfile
 import xml.etree.cElementTree as ET
 
-def get_corpora_from_tmx(filename, output_directory, languages):
+def get_corpora_from_tmx(filename):
     source, target = [], []
     iter_variable = 0
     for event, elem in ET.iterparse(filename, events=("start", "end")):
@@ -18,14 +18,11 @@ def get_corpora_from_tmx(filename, output_directory, languages):
                 if not elem.text == None:
                     target.append(elem.text.strip())
             iter_variable += 1
-            if iter_variable % 1000000 == 0:
-                write_corpus("\n".join(source), output_directory, languages[0])
-                source = []
-                write_corpus("\n".join(target), output_directory, languages[1])
-                target = []
+        elem.clear()
+    return "\n".join(source), "\n".join(target)
 
 def write_corpus(corpus, output_directory, language):
-    with open(f"{output_directory}/{language}.corpus.txt", "a") as f:
+    with open(f"{output_directory}/{language}.corpus.txt", "w") as f:
         f.write(corpus)
 
 if __name__ == "__main__":
@@ -34,5 +31,6 @@ if __name__ == "__main__":
     parser.add_argument('data', metavar='D', type=str, help='dataset file')
     parser.add_argument('--output', metavar='O', type=str, help='directory to store corpora in')
     args = parser.parse_args()
-    get_corpora_from_tmx(args.data, args.output, ("en", "de"))
-
+    source_corpus, target_corpus = get_corpora_from_tmx(args.data)
+    write_corpus(source_corpus, args.output, "en")
+    write_corpus(target_corpus, args.output, "de")
