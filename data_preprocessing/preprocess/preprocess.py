@@ -12,12 +12,14 @@ def get_corpora_from_tmx(filename):
     for event, elem in ET.iterparse(filename, events=("start", "end")):
         if event == "start" and elem.tag == "seg":
             if iter_variable % 2 == 0:
-                if not elem.text == None:
+                if elem.text is not None:
                     source.append(elem.text.strip())
+                    iter_variable += 1
             else:
-                if not elem.text == None:
+                if elem.text is not None:
                     target.append(elem.text.strip())
-            iter_variable += 1
+                    assert len(target) == len(source)
+                    iter_variable += 1
         elem.clear()
     return "\n".join(source), "\n".join(target)
 
