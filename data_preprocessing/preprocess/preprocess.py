@@ -3,8 +3,8 @@
 # email: hubert@cl.uni-heidelberg.de
 
 
-from translate.storage.tmx import tmxfile
 import xml.etree.cElementTree as ET
+
 
 def get_corpora_from_tmx(filename):
     source, target = [], []
@@ -23,15 +23,20 @@ def get_corpora_from_tmx(filename):
         elem.clear()
     return "\n".join(source), "\n".join(target)
 
+
 def write_corpus(corpus, output_directory, language):
     with open(f"{output_directory}/{language}.corpus.txt", "w") as f:
         f.write(corpus)
 
+
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
-    parser.add_argument('data', metavar='D', type=str, help='dataset file')
-    parser.add_argument('--output', metavar='O', type=str, help='directory to store corpora in')
+    parser.add_argument("data", metavar="D", type=str, help="dataset file")
+    parser.add_argument(
+        "--output", metavar="O", type=str, help="directory to store corpora in"
+    )
     args = parser.parse_args()
     source_corpus, target_corpus = get_corpora_from_tmx(args.data)
     write_corpus(source_corpus, args.output, "en")
