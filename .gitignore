@@ -10,3 +10,6 @@ fastBPE/
 *~
 *.swp
 *.swo
+*.pt
+*.en
+*.de
