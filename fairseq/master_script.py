@@ -90,7 +90,7 @@ if args.add_keys_job:
         train_index = " ".join([f"--trained-index {tindex}" for tindex in args.train_index])
         for shard_idx in range(num_shards):
             write_index = " ".join([f"--write-index {faiss_index}.{args.corpus_identifiers[dataset_idx]}.{index_id}" for faiss_index in args.faiss_index])
-            add_cmd = f"python fairseq_cli/generate.py {curr_save_data} --gen-subset train --path {args.model} --beam 5 --remove-bpe --bpe {args.bpe} --bpe-codes {args.bpecodes} --tokenizer moses --moses-source-lang en --moses-target-lang de --sacrebleu --score-reference --knn-keytype last_ffn_input  --model-overrides " + "\"{\'knn_keytype\':\'last_ffn_input\'}\"" + f" --save-knn-dstore --knn-add-to-idx --num-shards {num_shards} --shard-id {shard_idx} {train_index} {write_index} --quiet --knn-q2gpu"
+            add_cmd = f"python fairseq_cli/generate.py {curr_save_data} --gen-subset train --path {args.model} --beam 5 --remove-bpe --bpe {args.bpe} --bpe-codes {args.bpecodes} --tokenizer moses --source-lang en --target-lang de --sacrebleu --score-reference --knn-keytype last_ffn_input  --model-overrides " + "\"{\'knn_keytype\':\'last_ffn_input\'}\"" + f" --save-knn-dstore --knn-add-to-idx --num-shards {num_shards} --shard-id {shard_idx} {train_index} {write_index} --quiet --knn-q2gpu"
             print(add_cmd)
             index_id += 1 # remember this is 1 greater than the actual ids for indices, i.e. there are index_id number of indices but the last one is index_id - 1.
 
