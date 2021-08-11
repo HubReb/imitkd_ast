@@ -148,6 +148,7 @@ class BerardModel(FairseqEncoderDecoderModel):
             encoder_output_dim=2 * args.lstm_size,  # bidirectional
             attention_dim=args.attention_dim,
             output_layer_dim=args.output_layer_dim,
+            args=args
         )
         if getattr(args, "load_pretrained_decoder_from", None):
             decoder = checkpoint_utils.load_pretrained_component_from_model(
@@ -386,6 +387,7 @@ class LSTMDecoder(FairseqIncrementalDecoder):
         encoder_output_dim,
         attention_dim,
         output_layer_dim,
+        args=None
     ):
         """
         Args:
@@ -402,6 +404,8 @@ class LSTMDecoder(FairseqIncrementalDecoder):
                 projection.
         """
         super().__init__(dictionary)
+        self.knn_keytype = args.knn_keytype if hasattr(args, 'knn_keytype') else None
+
         self.num_layers = num_layers
         self.hidden_size = hidden_size
         num_embeddings = len(dictionary)
@@ -493,8 +497,11 @@ class LSTMDecoder(FairseqIncrementalDecoder):
                     attention_outs.append(attention_out)
                 input = attention_out
 
+
             # collect the output of the top layer
             outs.append(hidden)
+            if self.knn_keytype == 'last_ffn_input':
+                knn_emb = attention_out.clone()
 
         # cache previous states (no-op except during incremental generation)
         utils.set_incremental_state(
@@ -524,6 +531,9 @@ class LSTMDecoder(FairseqIncrementalDecoder):
         # to return the full attn_scores tensor, we need to fix the decoder
         # to account for subsampling input frames
         # return x, attn_scores
+        if self.knn_keytype == 'last_ffn_input':
+            return x, {self.knn_keytype: knn_emb}
+
         return x, None
 
     def reorder_incremental_state(self, incremental_state, new_order):
