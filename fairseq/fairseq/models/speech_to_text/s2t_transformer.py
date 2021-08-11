@@ -288,6 +288,7 @@ class S2TTransformerEncoder(FairseqEncoder):
         if args.no_scale_embedding:
             self.embed_scale = 1.0
         self.padding_idx = 1
+        self.knn_keytype = args.knn_keytype if hasattr(args, 'knn_keytype') else None
 
         self.subsample = Conv1dSubsampler(
             args.input_feat_per_channel * args.input_channels,
@@ -386,7 +387,7 @@ class TransformerDecoderScriptable(TransformerDecoder):
         alignment_heads: Optional[int] = None,
     ):
         # call scriptable method from parent class
-        x, _ = self.extract_features_scriptable(
+        x, attention_states_dictionary = self.extract_features_scriptable(
             prev_output_tokens,
             encoder_out,
             incremental_state,
@@ -394,6 +395,9 @@ class TransformerDecoderScriptable(TransformerDecoder):
             alignment_layer,
             alignment_heads,
         )
+        if self.knn_keytype == 'last_ffn_input' or self.knn_keytype == 'out_after_layernorm':
+            return x, attention_states_dictionary
+
         return x, None
 
 

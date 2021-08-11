@@ -331,12 +331,61 @@ def add_common_eval_args(group):
 
 def add_eval_lm_args(parser):
     group = parser.add_argument_group("LM Evaluation")
+
     add_common_eval_args(group)
     gen_parser_from_dataclass(group, EvalLMConfig())
 
 
 def add_generation_args(parser):
     group = parser.add_argument_group("Generation")
+    # knnmt arguments
+    group.add_argument('--knnmt', action='store_true',
+                       help='use the k-nearest neighbors for machine translation')
+    group.add_argument('--use-faiss-only', action='store_true',
+                       help='do not look up the keys/values from a separate array')
+    group.add_argument('--save-knn-dstore', action='store_true',
+                       help='save keys for the knn datastore')
+    group.add_argument('--dstore-mmap', default=None, type=str,
+                       help='If saving knn dstore, save keys and values to this file')
+    group.add_argument('--knn-embed-dim', default=None, type=int,
+                       help='dimension of embeddings stored in knn dstore')
+    group.add_argument('--knn-start', default=-1, type=int,
+                       help='sample at which to start saving keys and values')
+    group.add_argument('--knn-proc', default=-1, type=int,
+                       help='number of samples to process for knn')
+    group.add_argument('--save-knns', action='store_true',
+                       help='saved retrieved knns, values and log probs')
+    group.add_argument('--save-knns-filename', type=str,
+                       help='file to save knns, values and log probs retrieved')
+    group.add_argument('--knn-temp', default=1.0, type=float,
+                       help='temperature for the knn softmax')
+    group.add_argument('--save-knn-subset', action='store_true', default=False,
+                       help='only save keys/values for a subset of the examples, do not sort by length')
+    group.add_argument('--save-knn-subset-num', type=int, default=1000000,
+                       help='minimum number of tokens to save')
+    group.add_argument('--knn-add-to-idx', action='store_true', default=False,
+                       help='Add keys to the faiss index directly')
+    group.add_argument('--knn-trim-data', action='store_true', default=False,
+                       help='map the dataset to only the data the job cares about')
+    group.add_argument('--knn-add-num-to-idx', type=int, default=10000000,
+                       help='number of keys to add to the index')
+    group.add_argument('--knn-add-idx-global-id', type=int,
+                       help='the position to start faiss ids for the keys, important when adding to one index from many different train files')
+    group.add_argument('--knn-add-idx-pos-in-dataset', type=int,
+                       help='number of tokens to skip in the dataset')
+#    group.add_argument('--trained-index', type=str, action='append',
+#                       help='trained faiss index')
+#    group.add_argument('--write-index', type=str, action='append',
+#                       help='file to write index with added keys')
+    group.add_argument('--knn-q2gpu', action='store_true', default=False,
+                       help='move the quantizer from faiss to gpu')
+    group.add_argument('--drop-lang-tok', action='store_true', default=False,
+                       help='do not add the language token to the knn dstore')
+    group.add_argument('--knn-backoff', action='store_true', default=False,
+            help='use model output when knn below some threshold')
+    group.add_argument('--knn-backoff-thresh', type=float,
+            help='probability threshold for backing off to model output')
+ 
     add_common_eval_args(group)
     gen_parser_from_dataclass(group, GenerationConfig())
     return group

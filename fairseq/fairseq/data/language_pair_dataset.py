@@ -223,7 +223,9 @@ class LanguagePairDataset(FairseqDataset):
         src_lang_id=None,
         tgt_lang_id=None,
         pad_to_multiple=1,
+        args=None
     ):
+        self.args = args
         if tgt_dict is not None:
             assert src_dict.pad() == tgt_dict.pad()
             assert src_dict.eos() == tgt_dict.eos()
@@ -426,6 +428,8 @@ class LanguagePairDataset(FairseqDataset):
         on this order."""
         if self.shuffle:
             indices = np.random.permutation(len(self)).astype(np.int64)
+            if self.args and hasattr(self.args, "save_knn_subset") and self.args.save_knn_subset:
+                return indices
         else:
             indices = np.arange(len(self), dtype=np.int64)
         if self.buckets is None:

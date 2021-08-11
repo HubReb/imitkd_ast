@@ -25,10 +25,9 @@ from omegaconf import DictConfig
 
 
 def main(cfg: DictConfig):
-
+    # get args to see if we are dealing with knmmmt
     if isinstance(cfg, Namespace):
         cfg = convert_namespace_to_omegaconf(cfg)
-
     assert cfg.common_eval.path is not None, "--path required for generation!"
     assert (
         not cfg.generation.sampling or cfg.generation.nbest == cfg.generation.beam
@@ -132,7 +131,8 @@ def _main(cfg: DictConfig, output_file):
         if use_cuda and not cfg.distributed_training.pipeline_model_parallel:
             model.cuda()
         model.prepare_for_inference_(cfg)
-
+    # we need model variable for knnmt, so hacking it in here (RH)
+    model = models[-1]
     # Load alignment dictionary for unknown word replacement
     # (None if no unknown word replacement, empty if no path to align dictionary)
     align_dict = utils.load_align_dict(cfg.generation.replace_unk)
@@ -165,7 +165,7 @@ def _main(cfg: DictConfig, output_file):
 
     extra_gen_cls_kwargs = {"lm_model": lms[0], "lm_weight": cfg.generation.lm_weight}
     generator = task.build_generator(
-        models, cfg.generation, extra_gen_cls_kwargs=extra_gen_cls_kwargs
+        models, cfg.generation, extra_gen_cls_kwargs=extra_gen_cls_kwargs, task_extra_args=cfg.task
     )
 
     # Handle tokenization and BPE
@@ -178,6 +178,75 @@ def _main(cfg: DictConfig, output_file):
         if tokenizer is not None:
             x = tokenizer.decode(x)
         return x
+    ## knn saving code
+    if cfg.task.save_knn_dstore:
+        print('keytype being saved:', cfg.task.knn_keytype)
+        if cfg.task.knn_start > -1:
+            chunk_size = 100000
+            if cfg.task.dstore_fp16:
+                print('Saving fp16')
+                dstore_keys = np.zeros([chunk_size, model.decoder.embed_dim], dtype=np.float16)
+                dstore_vals = np.zeros([chunk_size, 1], dtype=np.int16)
+            else:
+                print('Saving fp32')
+                dstore_keys = np.zeros([chunk_size, model.decoder.embed_dim], dtype=np.float32)
+                dstore_vals = np.zeros([chunk_size, 1], dtype=np.int)
+
+        else:
+            assert not (cfg.task.save_knn_subset and cfg.task.knn_add_to_idx)
+            dstore_size = cfg.task.dstore_size
+            if cfg.task.save_knn_subset:
+                dstore_size = cfg.task.save_knn_subset_num
+            if cfg.task.dstore_fp16:
+                print('Saving fp16')
+                if cfg.task.knn_add_to_idx:
+                    faiss_indices = []
+                    for tindex in cfg.task.trained_index:
+                        print("Reading trained index from %s" % tindex)
+                        faiss_indices.append(faiss.read_index(tindex))
+                        if cfg.task.knn_q2gpu:
+                            assert len(cfg.task.trained_index) == 1
+                            print("Moving quantizer to GPU")
+                            index_ivf = faiss.extract_index_ivf(faiss_indices[0])
+                            quantizer = index_ivf.quantizer
+                            quantizer_gpu = faiss.index_cpu_to_all_gpus(quantizer, ngpu=1)
+                            index_ivf.quantizer = quantizer_gpu
+                else:
+                    dstore_keys = np.memmap(cfg.task.dstore_mmap+'_keys.npy', dtype=np.float16, mode='w+', shape=(dstore_size, model.decoder.embed_dim))
+                    dstore_vals = np.memmap(cfg.task.dstore_mmap+'_vals.npy', dtype=np.int16, mode='w+', shape=(dstore_size, 1))
+            else:
+                print('Saving fp32')
+                if cfg.task.knn_add_to_idx:
+                    faiss_indices = []
+                    for tindex in cfg.task.trained_index:
+                        print("Reading trained index from %s" % tindex)
+                        faiss_indices.append(faiss.read_index(tindex))
+                        if cfg.task.knn_q2gpu:
+                            assert len(cfg.task.trained_index) == 1
+                            print("Moving quantizer to GPU")
+                            index_ivf = faiss.extract_index_ivf(faiss_indices[0])
+                            quantizer = index_ivf.quantizer
+                            quantizer_gpu = faiss.index_cpu_to_all_gpus(quantizer, ngpu=1)
+                            index_ivf.quantizer = quantizer_gpu
+                else:
+                    dstore_keys = np.memmap(cfg.task.dstore_mmap+'_keys.npy', dtype=np.float32, mode='w+', shape=(dstore_size, model.decoder.embed_dim))
+                    dstore_vals = np.memmap(cfg.task.dstore_mmap+'_vals.npy', dtype=np.int, mode='w+', shape=(dstore_size, 1))
+
+        dstore_idx = 0
+        total_saved = 0
+        knn_num_samples_proc = 0
+        to_skip = -1
+        if cfg.task.knn_start > -1:
+            to_skip = cfg.task.knn_start # examples
+            start_pos = 0
+        if cfg.task.knn_add_to_idx:
+            adding_to_faiss = 0
+        # save the sample ids and the lengths for backtracking the neighbors
+        sample_order_lens = [[],[]]
+    if cfg.task.knnmt and cfg.task.save_knns:
+        to_save_objects = []
+    ## knn saving code
+
 
     scorer = scoring.build_scorer(cfg.scoring, tgt_dict)
 
@@ -188,7 +257,41 @@ def _main(cfg: DictConfig, output_file):
         sample = utils.move_to_cuda(sample) if use_cuda else sample
         if "net_input" not in sample:
             continue
+        ## For processing in parallel
+        if cfg.task.save_knn_dstore and to_skip > 0:
+            num_samples = sample['target'].shape[0]
+            if to_skip - num_samples > 0:
+                to_skip -= num_samples
+                target_tokens = utils.strip_pad(sample['target'], tgt_dict.pad()).int().cpu()
+                start_pos += len(target_tokens)
+                continue
 
+            for i, sample_id in enumerate(sample['id'].tolist()):
+                if to_skip > 0:
+                    to_skip -= 1
+                    target_tokens = utils.strip_pad(sample['target'][i, :], tgt_dict.pad()).int().cpu()
+                    start_pos += len(target_tokens)
+                else:
+                    tgt_tokens = utils.strip_pad(sample['target'][i:], tgt_dict.pad()).int().cpu()
+                    new_sample = {
+                            'id': sample['id'][i:],
+                            'nsentences': len(sample['id'][i:]),
+                            'ntokens': len(tgt_tokens),
+                            'net_input': {
+                                'src_tokens': sample['net_input']['src_tokens'][i:],
+                                'src_lengths': sample['net_input']['src_lengths'][i:],
+                                'prev_output_tokens': sample['net_input']['prev_output_tokens'][i:],
+                            },
+                            'target': sample['target'][i:]
+
+                    }
+                    sample = new_sample
+                    break
+
+            print('Starting the saving at location %d in the mmap' % start_pos)
+        ## For processing in parallel
+
+ 
         prefix_tokens = None
         if cfg.generation.prefix_size > 0:
             prefix_tokens = sample["target"][:, : cfg.generation.prefix_size]
@@ -207,6 +310,13 @@ def _main(cfg: DictConfig, output_file):
         )
         num_generated_tokens = sum(len(h[0]["tokens"]) for h in hypos)
         gen_timer.stop(num_generated_tokens)
+        if cfg.task.knn_add_to_idx:
+            saving = sample['ntokens']
+            if cfg.task.drop_lang_tok:
+                saving = sample['ntokens'] - sample['target'].shape[0]
+            keys = np.zeros([saving, model.decoder.embed_dim], dtype=np.float32)
+            addids = np.zeros([saving], dtype=np.int)
+            save_idx = 0
 
         for i, sample_id in enumerate(sample["id"].tolist()):
             has_target = sample["target"] is not None
@@ -224,6 +334,74 @@ def _main(cfg: DictConfig, output_file):
                 target_tokens = (
                     utils.strip_pad(sample["target"][i, :], tgt_dict.pad()).int().cpu()
                 )
+            ## knn saving code
+            if cfg.task.save_knn_dstore:
+                hypo = hypos[i][0]
+                num_items = len(hypo['tokens'])
+                #print(num_items, hypo['dstore_keys_mt'].shape)
+                #print(hypo['tokens'])
+                #print(hypo['dstore_keys_mt'])
+                #exit(0)
+                #sample_order_lens[0].append(sample_id)
+                #sample_order_lens[1].append(num_items)
+                #if dstore_idx + shape[0] > cfg.task.dstore_size:
+                #    shape = [cfg.task.dstore_size - dstore_idx]
+                #    hypo['dstore_keys_mt'] = hypo['dstore_keys_mt'][:shape[0]]
+                if cfg.task.knn_start > -1:
+                    if dstore_idx + num_items > dstore_keys.shape[0]:
+                        if cfg.task.dstore_fp16:
+                            dstore_keys = np.concatenate([dstore_keys, np.zeros([chunk_size, model.decoder.embed_dim], dtype=np.float16)], axis=0)
+                            dstore_vals = np.concatenate([dstore_vals, np.zeros([chunk_size, 1], dtype=np.int16)], axis=0)
+                        else:
+                            dstore_keys = np.concatenate([dstore_keys, np.zeros([chunk_size, model.decoder.embed_dim], dtype=np.float32)], axis=0)
+                            dstore_vals = np.concatenate([dstore_vals, np.zeros([chunk_size, 1], dtype=np.int)], axis=0)
+
+                skip = 0
+                if cfg.task.drop_lang_tok:
+                    skip += 1
+
+                if cfg.task.save_knn_subset:
+                    if total_saved + num_items - skip > cfg.task.save_knn_subset_num:
+                        num_items = cfg.task.save_knn_subset_num - total_saved + skip
+
+                if cfg.task.knn_add_to_idx:
+                    keys[save_idx:save_idx+num_items-skip] = hypo['dstore_keys_mt'][skip:num_items].view(
+                            -1, model.decoder.embed_dim).cpu().numpy().astype(np.float32)
+                    addids[save_idx:save_idx+num_items-skip] = hypo['tokens'][skip:num_items].view(
+                            -1).cpu().numpy().astype(np.int)
+                    save_idx += num_items - skip
+
+                if not cfg.task.knn_add_to_idx:
+                    if cfg.task.dstore_fp16:
+                        dstore_keys[dstore_idx:num_items-skip+dstore_idx] = hypo['dstore_keys_mt'][skip:num_items].view(
+                                -1, model.decoder.embed_dim).cpu().numpy().astype(np.float16)
+                        dstore_vals[dstore_idx:num_items-skip+dstore_idx] = hypo['tokens'][skip:num_items].view(
+                                -1, 1).cpu().numpy().astype(np.int16)
+                    else:
+                        dstore_keys[dstore_idx:num_items-skip+dstore_idx] = hypo['dstore_keys_mt'][skip:num_items].view(
+                                -1, model.decoder.embed_dim).cpu().numpy().astype(np.float32)
+                        dstore_vals[dstore_idx:num_items-skip+dstore_idx] = hypo['tokens'][skip:num_items].view(
+                                -1, 1).cpu().numpy().astype(np.int)
+
+                dstore_idx += num_items - skip
+                total_saved += num_items - skip
+                knn_num_samples_proc += 1
+            ## knn saving code
+            if cfg.generation.score_reference:
+                continue
+
+            ## error analysis knnmt: save knns, vals and probs
+            if cfg.task.knnmt and cfg.task.save_knns:
+                to_save_objects.append(
+                        {
+                            "id": sample_id,
+                            "src": src_tokens,
+                            "tgt": target_tokens,
+                            "hypo": hypos[i],
+                        }
+                    )
+            ## error analysis knnmt: save knns, vals and probs
+
 
             # Either retrieve the original sentences or regenerate them from tokens.
             if align_dict is not None:
@@ -361,12 +539,63 @@ def _main(cfg: DictConfig, output_file):
                     else:
                         scorer.add(target_tokens, hypo_tokens)
 
+            if cfg.knn_start > -1 and knn_num_samples_proc == cfg.knn_proc:
+                break
+            if cfg.save_knn_subset and total_saved >= cfg.save_knn_subset_num:
+                break
+            #if i > 10:
+            #    break
+        if cfg.task.knn_start > -1 and knn_num_samples_proc == cfg.task.knn_proc:
+            break
+        if cfg.task.save_knn_subset and total_saved >= cfg.task.save_knn_subset_num:
+            break
+        if cfg.task.knn_add_to_idx:
+            adding_to_faiss += keys.shape[0]
+            for fidx in range(len(cfg.trained_index)):
+                faiss_indices[fidx].add_with_ids(keys, addids)
+            #print(f"loop time {time.time()-knn_start_loop}s")
+
+        #print(idx)
+        #if idx == 0:
+        #    break
+
+
+
+
         wps_meter.update(num_generated_tokens)
         progress.log({"wps": round(wps_meter.avg)})
         num_sentences += (
             sample["nsentences"] if "nsentences" in sample else sample["id"].numel()
         )
+    if cfg.task.knn_q2gpu:
+        index_ivf.quantizer = quantizer
+        del quantizer_gpu
 
+    if cfg.task.save_knn_dstore:
+        if cfg.task.knn_start > -1:
+            dstore_keys = dstore_keys[:total_saved]
+            dstore_vals = dstore_vals[:total_saved]
+            np.savez(cfg.task.dstore_mmap+".keys_vals.%d.%d" % (cfg.task.knn_start, cfg.task.knn_start + knn_num_samples_proc - 1), keys=dstore_keys, vals=dstore_vals)
+            print("Final dstore position = %d" % (start_pos + total_saved - 1))
+            print("Number of examples processed = %d" % knn_num_samples_proc)
+            knn_samples_savefile = cfg.task.dstore_mmap+".samples.%d.%d" % (cfg.task.knn_start, cfg.task.knn_start + knn_num_samples_proc - 1)
+        #else:
+        #    knn_samples_savefile = cfg.task.dstore_mmap+".samples"
+        #np.save(knn_samples_savefile, np.array(sample_order_lens, dtype=np.int))
+        print("dstore_idx", dstore_idx, "final number of items added", num_items - skip, "total saved", total_saved)
+        if not cfg.task.knn_add_to_idx:
+            print("Keys", dstore_keys.shape, dstore_keys.dtype)
+            print("Vals", dstore_vals.shape, dstore_vals.dtype)
+        else:
+            for widx, write_index in enumerate(cfg.task.write_index):
+                faiss.write_index(faiss_indices[widx], write_index)
+                print("Added to faiss", adding_to_faiss)
+                #print("Final global position %d" % global_end)
+
+    if cfg.task.knnmt and cfg.task.save_knns:
+        pickle.dump(to_save_objects, open(cfg.task.save_knns_filename, "wb"))
+
+ 
     logger.info("NOTE: hypothesis and token scores are output in base 2")
     logger.info(
         "Translated {:,} sentences ({:,} tokens) in {:.1f}s ({:.2f} sentences/s, {:.2f} tokens/s)".format(

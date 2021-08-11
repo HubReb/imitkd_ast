@@ -72,7 +72,33 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                             action=FileContentsAction)
         parser.add_argument('--keep-inference-langtok', action='store_true',
                             help='keep language tokens in inference output (e.g. for analysis or debugging)')
-
+        ## knn related items
+        parser.add_argument('--knn-keytype', type=str, default=None,
+                help='use last_ffn_input')
+        parser.add_argument('--probe', default=8, type=int,
+                help='for FAISS, the number of lists to query')
+        parser.add_argument('--k', default=1024, type=int,
+                help='number of nearest neighbors to retrieve')
+        # default value is the one for news-comm-14
+        parser.add_argument('--dstore-size', default=9651607, type=int,
+                help='number of items in the knn datastore')
+        parser.add_argument('--dstore-filename', type=str, default=None,
+                help='File where the knn datastore is saved')
+        parser.add_argument('--indexfile', type=str, default=None,
+                help='File containing the index built using faiss for knn')
+        parser.add_argument('--lmbda', default=0.0, type=float,
+                help='controls interpolation with knn, 0.0 = no knn')
+        parser.add_argument('--knn-sim-func', default=None, type=str,
+                help='similarity function to use for knns')
+        parser.add_argument('--faiss-metric-type', default='l2', type=str,
+                help='the distance metric for faiss')
+        parser.add_argument('--no-load-keys', default=False, action='store_true',
+                help='do not load keys')
+        parser.add_argument('--dstore-fp16', default=False, action='store_true',
+                help='if true, datastore items are saved in fp16 and int16')
+        parser.add_argument('--move-dstore-to-mem', default=False, action='store_true',
+                help='move the keys and values for knn to memory')
+ 
         SamplingMethod.add_arguments(parser)
         MultilingualDatasetManager.add_args(parser)
         # fmt: on

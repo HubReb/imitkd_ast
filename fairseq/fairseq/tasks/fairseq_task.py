@@ -83,6 +83,7 @@ class FairseqTask(object):
     state: StatefulContainer = None
 
     def __init__(self, cfg: FairseqDataclass, **kwargs):
+        self.args = cfg
         self.cfg = cfg
         self.datasets = dict()
         self.dataset_to_epoch_iter = dict()
@@ -340,14 +341,14 @@ class FairseqTask(object):
         return criterions.build_criterion(cfg, self)
 
     def build_generator(
-        self, models, args, seq_gen_cls=None, extra_gen_cls_kwargs=None
+        self, models, args, seq_gen_cls=None, extra_gen_cls_kwargs=None, task_extra_args=None
     ):
         if getattr(args, "score_reference", False):
             from fairseq.sequence_scorer import SequenceScorer
-
             return SequenceScorer(
                 self.target_dictionary,
                 compute_alignment=getattr(args, "print_alignment", False),
+                args=task_extra_args
             )
 
         from fairseq.sequence_generator import (
@@ -428,7 +429,6 @@ class FairseqTask(object):
                 seq_gen_cls = FBSequenceGenerator
             else:
                 seq_gen_cls = SequenceGenerator
-
         return seq_gen_cls(
             models,
             self.target_dictionary,
@@ -443,6 +443,7 @@ class FairseqTask(object):
             match_source_len=getattr(args, "match_source_len", False),
             no_repeat_ngram_size=getattr(args, "no_repeat_ngram_size", 0),
             search_strategy=search_strategy,
+            args=task_extra_args,
             **extra_gen_cls_kwargs,
         )
 

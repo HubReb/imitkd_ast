@@ -288,6 +288,7 @@ class TransformerDecoderLayer(nn.Module):
         self_attn_padding_mask: Optional[torch.Tensor] = None,
         need_attn: bool = False,
         need_head_weights: bool = False,
+        ret_ffn_inp: bool = False,
     ):
         """
         Args:
@@ -308,6 +309,7 @@ class TransformerDecoderLayer(nn.Module):
         residual = x
         if self.normalize_before:
             x = self.self_attn_layer_norm(x)
+
         if prev_self_attn_state is not None:
             prev_key, prev_value = prev_self_attn_state[:2]
             saved_state: Dict[str, Optional[Tensor]] = {
@@ -390,6 +392,8 @@ class TransformerDecoderLayer(nn.Module):
         residual = x
         if self.normalize_before:
             x = self.final_layer_norm(x)
+        if ret_ffn_inp:
+            ffn_inp = x.clone()
 
         x = self.activation_fn(self.fc1(x))
         x = self.activation_dropout_module(x)
@@ -410,6 +414,8 @@ class TransformerDecoderLayer(nn.Module):
             else:
                 self_attn_state = [saved_state["prev_key"], saved_state["prev_value"]]
             return x, attn, self_attn_state
+        if ret_ffn_inp:
+            return x, ((attn, ffn_inp)), None
         return x, attn, None
 
     def make_generation_fast_(self, need_attn: bool = False, **kwargs):

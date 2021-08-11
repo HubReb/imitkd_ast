@@ -21,7 +21,7 @@ class ConcatDataset(FairseqDataset):
             s += curr_len
         return r
 
-    def __init__(self, datasets, sample_ratios=1):
+    def __init__(self, datasets, sample_ratios=1, args=None):
         super(ConcatDataset, self).__init__()
         assert len(datasets) > 0, "datasets should not be an empty iterable"
         self.datasets = list(datasets)
@@ -30,6 +30,7 @@ class ConcatDataset(FairseqDataset):
         self.sample_ratios = sample_ratios
         self.cumulative_sizes = self.cumsum(self.datasets, sample_ratios)
         self.real_sizes = [len(d) for d in self.datasets]
+        self.args = args
 
     def __len__(self):
         return self.cumulative_sizes[-1]
@@ -102,6 +103,10 @@ class ConcatDataset(FairseqDataset):
             if tgt_sizes is not None:
                 indices = indices[np.argsort(tgt_sizes[indices], kind="mergesort")]
             return indices[np.argsort(src_sizes[indices], kind="mergesort")]
+        elif self.args and hasattr(self.args, "save_knn_subset") and self.args.save_knn_subset:
+            print("SHUFFLING!!!!!!!!!")
+            return np.random.permutation(len(self.sizes))
+ 
         else:
             return np.argsort(self.sizes)
 

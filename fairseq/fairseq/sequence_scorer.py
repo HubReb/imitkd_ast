@@ -19,9 +19,11 @@ class SequenceScorer(object):
         compute_alignment=False,
         eos=None,
         symbols_to_strip_from_output=None,
+        args=None
     ):
         self.pad = tgt_dict.pad()
         self.eos = tgt_dict.eos() if eos is None else eos
+        self.args = args
         self.softmax_batch = softmax_batch or sys.maxsize
         assert self.softmax_batch > 0
         self.compute_alignment = compute_alignment
@@ -92,6 +94,25 @@ class SequenceScorer(object):
                 sample["target"] = orig_target
 
             probs = probs.view(sample["target"].shape)
+            if 'knn_dstore' in kwargs:
+                dstore = kwargs['knn_dstore']
+                # TxBxC
+                queries = bd[1][self.args.knn_keytype]
+                if len(models) != 1:
+                    raise ValueError('Only knn *log* probs are supported.')
+
+                yhat_knn_prob = dstore.get_knn_log_prob(
+                        queries,
+                        orig_target.permute(1, 0),
+                        pad_idx=self.pad)
+                yhat_knn_prob = yhat_knn_prob.permute(1, 0, 2).squeeze(-1)
+                if self.args.fp16:
+                    yhat_knn_prob = yhat_knn_prob.half()
+                    probs = probs.half()
+
+                probs = combine_knn_and_vocab_probs(
+                            yhat_knn_prob, probs, self.args.lmbda)
+
 
             if avg_probs is None:
                 avg_probs = probs
@@ -139,15 +160,13 @@ class SequenceScorer(object):
                     alignment = None
             else:
                 avg_attn_i = alignment = None
-            hypos.append(
-                [
-                    {
-                        "tokens": ref,
-                        "score": score_i,
-                        "attention": avg_attn_i,
-                        "alignment": alignment,
-                        "positional_scores": avg_probs_i,
-                    }
-                ]
-            )
+            hypos.append([{
+                'tokens': ref,
+                'score': score_i,
+                'attention': avg_attn_i,
+                'alignment': alignment,
+                'positional_scores': avg_probs_i,
+                'dstore_keys': decoder_out[1][self.args.knn_keytype][start_idxs[i]:,i,:] if hasattr(self.args, 'save_knnlm_dstore') and self.args.save_knnlm_dstore else None,
+                'dstore_keys_mt': decoder_out[1][self.args.knn_keytype][start_idxs[i]:,i,:] if hasattr(self.args, 'save_knn_dstore') and self.args.save_knn_dstore else None,
+            }])
         return hypos

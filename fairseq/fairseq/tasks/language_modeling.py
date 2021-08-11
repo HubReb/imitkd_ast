@@ -102,6 +102,58 @@ class LanguageModelingConfig(FairseqDataclass):
     tpu: bool = II("common.tpu")
     use_plasma_view: bool = II("common.use_plasma_view")
     plasma_path: str = II("common.plasma_path")
+    ## knn related items
+    knn_keytype: Optional[str] = field(
+            default=None,
+            metadata={"help": "use last_ffn_input"}
+    )
+    probe: Optional[int] = field(
+            default=8,
+            metadata={"help": "for FAISS, the number of lists to query"},
+    )
+    k: Optional[int] = field(
+        default=1024,
+        metadata={"help": "number of nearest neighbors to retrieve"}
+    )
+    # default value is the one for news-comm-14
+    dstore_size: Optional[int] = field(
+            default=9651607,
+            metadata={"help": "number of items in the knn datastore"},
+    )
+    dstore_filename: Optional[str] = field(
+            default=None,
+            metadata={"help": "File where the knn datastore is saved"}
+    )
+    indexfile: Optional[str] = field(
+            default=None,
+            metadata={"help": "File containing the index built using faiss for knn"}
+    )
+    lmbda: Optional[float] = field(
+            default=0.0,
+            metadata={"help": "controls interpolation with knn, 0.0 = no knn"}
+    )
+    knn_sim_func: Optional[str] = field(
+            default=None,
+            metadata={"help": "similarity function to use for knns"}
+    )
+    faiss_metric_type: Optional[str] = field(
+            default='l2',
+            metadata={"help": "the distance metric for faiss"}
+    )
+    no_load_keys: bool = field(
+            default=False,
+            metadata={"help": "do not load keys"}
+    )
+    dstore_fp16: bool = field(
+            default=False,
+            metadata={"help": "if true, datastore items are saved in fp16 and int16"}
+    )
+    move_dstore_to_mem: bool = field(
+            default=False,
+            metadata={"help": "move the keys and values for knn to memory"}
+    )
+    ## knnlm related items
+
 
 
 @register_task("language_modeling", dataclass=LanguageModelingConfig)

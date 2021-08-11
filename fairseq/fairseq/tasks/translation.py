@@ -58,6 +58,7 @@ def load_langpair_dataset(
     shuffle=True,
     pad_to_multiple=1,
     prepend_bos_src=None,
+    args=None
 ):
     def split_exists(split, src, tgt, lang, data_path):
         filename = os.path.join(data_path, "{}.{}-{}.{}".format(split, src, tgt, lang))
@@ -262,6 +263,82 @@ class TranslationConfig(FairseqDataclass):
     eval_bleu_print_samples: bool = field(
         default=False, metadata={"help": "print sample generations during validation"}
     )
+    ## knn related items
+    knn_keytype: Optional[str] = field(
+            default=None,
+            metadata={"help": "use last_ffn_input"}
+    )
+    probe: Optional[int] = field(
+            default=8,
+            metadata={"help": "for FAISS, the number of lists to query"},
+    )
+    k: Optional[int] = field(
+        default=1024,
+        metadata={"help": "number of nearest neighbors to retrieve"}
+    )
+    # default value is the one for news-comm-14
+    dstore_size: int = field(
+            default=9651607,
+            metadata={"help": "number of items in the knn datastore"},
+    )
+    dstore_filename: Optional[str] = field(
+            default=None,
+            metadata={"help": "File where the knn datastore is saved"}
+    )
+    indexfile: Optional[str] = field(
+            default=None,
+            metadata={"help": "File containing the index built using faiss for knn"}
+    )
+    lmbda: Optional[float] = field(
+            default=0.0,
+            metadata={"help": "controls interpolation with knn, 0.0 = no knn"}
+    )
+    knn_sim_func: Optional[str] = field(
+            default=None,
+            metadata={"help": "similarity function to use for knns"}
+    )
+    faiss_metric_type: Optional[str] = field(
+            default='l2',
+            metadata={"help": "the distance metric for faiss"}
+    )
+    no_load_keys: bool = field(
+            default=False,
+            metadata={"help": "do not load keys"}
+    )
+    dstore_fp16: bool = field(
+            default=False,
+            metadata={"help": "if true, datastore items are saved in fp16 and int16"}
+    )
+    move_dstore_to_mem: bool = field(
+            default=False,
+            metadata={"help": "move the keys and values for knn to memory"}
+    )
+    # knnmt arguments
+    knnmt: bool = field(
+            default=False
+    )
+    use_faiss_only: bool = field(default=False)
+    save_knn_dstore: bool = field(default=False)
+    dstore_mmap: Optional[str] = field(default=None)
+    knn_embed_dim: Optional[int] = field(default=None)
+    knn_start: int = field(default=-1)
+    knn_proc: int = field(default=-1)
+    save_knns: bool = field(default=False)
+    save_knns_filename: Optional[str] = field(default=None)
+    knn_temp: float = field(default=1.0)
+    save_knn_subset: bool = field(default=False)
+    save_knn_subset_num: int = field(default=1000000)
+    knn_add_to_idx: bool = field(default=False)
+    knn_trim_data: bool = field(default=False)
+    knn_add_num_to_idx: int = field(default=10000000)
+    knn_add_idx_global_id: Optional[int] = field(default=None)
+    knn_add_idx_pos_in_dataset: Optional[int] = field(default=None)
+    knn_q2gpu: bool = field(default=False)
+    drop_lang_tok: bool = field(default=False)
+    knn_backoff: bool = field(default=False)
+    trained_index: Optional[str] = field(default=None)
+    write_index: Optional[str] = field(default=None)
+    ## knnlm related items
 
 
 @register_task("translation", dataclass=TranslationConfig)
@@ -283,6 +360,7 @@ class TranslationTask(FairseqTask):
 
     def __init__(self, cfg: TranslationConfig, src_dict, tgt_dict):
         super().__init__(cfg)
+        print(cfg)
         self.src_dict = src_dict
         self.tgt_dict = tgt_dict
 
@@ -354,6 +432,7 @@ class TranslationTask(FairseqTask):
             num_buckets=self.cfg.num_batch_buckets,
             shuffle=(split != "test"),
             pad_to_multiple=self.cfg.required_seq_len_multiple,
+            args=self.cfg
         )
 
     def build_dataset_for_inference(self, src_tokens, src_lengths, constraints=None):
@@ -485,3 +564,4 @@ class TranslationTask(FairseqTask):
             return sacrebleu.corpus_bleu(hyps, [refs], tokenize="none")
         else:
             return sacrebleu.corpus_bleu(hyps, [refs])
+

@@ -7,6 +7,8 @@ import math
 from typing import Dict, List, Optional
 import sys
 
+import numpy as np
+
 import torch
 import torch.nn as nn
 from fairseq import search, utils
@@ -14,6 +16,7 @@ from fairseq.data import data_utils
 from fairseq.models import FairseqIncrementalDecoder
 from torch import Tensor
 from fairseq.ngram_repeat_block import NGramRepeatBlock
+from fairseq.knnlm import KNN_Dstore
 
 
 class SequenceGenerator(nn.Module):
@@ -35,6 +38,7 @@ class SequenceGenerator(nn.Module):
         search_strategy=None,
         eos=None,
         symbols_to_strip_from_output=None,
+        args=None,
         lm_model=None,
         lm_weight=1.0,
     ):
@@ -63,6 +67,7 @@ class SequenceGenerator(nn.Module):
                 length (default: False)
         """
         super().__init__()
+        print("SequenceGenerator: ", args)
         if isinstance(models, EnsembleModel):
             self.model = models
         else:
@@ -84,6 +89,12 @@ class SequenceGenerator(nn.Module):
         self.max_len_b = max_len_b
         self.min_len = min_len
         self.max_len = max_len or self.model.max_decoder_positions()
+        self.args = args
+        # print("sequence generator arguments: ", args)
+        if self.args and self.args.knnmt:
+            self.knn_dstore = KNN_Dstore(args)
+
+
 
         self.normalize_scores = normalize_scores
         self.len_penalty = len_penalty
@@ -311,6 +322,14 @@ class SequenceGenerator(nn.Module):
         else:
             original_batch_idxs = torch.arange(0, bsz).type_as(tokens)
 
+        if self.args and self.args.knnmt and self.args.save_knns:
+            assert beam_size == 1, "Saving knns for beam size > 1 is too complicated!"
+            knns = torch.zeros([bsz, max_len+1, self.args.k], dtype=torch.int)
+            vals = torch.zeros([bsz, max_len+1, self.args.k], dtype=torch.int)
+            probs = torch.zeros([bsz, max_len+1, self.args.k], dtype=torch.float32)
+
+
+
         for step in range(max_len + 1):  # one extra step for EOS marker
             # reorder decoder internal states based on the prev choice of beams
             if reorder_state is not None:
@@ -328,12 +347,21 @@ class SequenceGenerator(nn.Module):
                     encoder_outs, reorder_state
                 )
 
-            lprobs, avg_attn_scores = self.model.forward_decoder(
-                tokens[:, : step + 1],
-                encoder_outs,
-                incremental_states,
-                self.temperature,
-            )
+            if self.args:
+                lprobs, avg_attn_scores = self.model.forward_decoder(
+                    tokens[:, : step + 1],
+                    encoder_outs,
+                    incremental_states,
+                    self.temperature,
+                    args=self.args,
+                )
+            else:
+                lprobs, avg_attn_scores = self.model.forward_decoder(
+                    tokens[:, : step + 1],
+                    encoder_outs,
+                    incremental_states,
+                    self.temperature,
+                )
 
             if self.lm_model is not None:
                 lm_out = self.lm_model(tokens[:, : step + 1])
@@ -342,7 +370,50 @@ class SequenceGenerator(nn.Module):
                 )
                 probs = probs[:, -1, :] * self.lm_weight
                 lprobs += probs
+            if self.args and self.args.knnmt:
+                queries = avg_attn_scores[self.args.knn_keytype]
+                if len(avg_attn_scores.keys()) > 2:
+                    del avg_attn_scores[self.args.knn_keytype]
+                else:
+                    avg_attn_scores = avg_attn_scores["attn"]
 
+                knn_scores = self.knn_dstore.get_knn_scores_per_step(
+                        queries,
+                        lprobs.shape[-1],
+                        self.pad,
+                        use_dtype=torch.float16 if self.args.fp16 else torch.float32,
+                        save_knns=self.args.save_knns,
+                        knn_temp=self.args.knn_temp)
+
+                if self.args.save_knns:
+                    k, p, v = knn_scores[1]
+                    knns[:, step, :] = k
+                    vals[:, step, :] = v
+                    probs[:, step, :] = p
+                    knn_scores = knn_scores[0]
+
+                #print(knn_scores.shape)
+                if self.args.lmbda > 0:
+                    lprobs = torch.stack([lprobs, knn_scores.to(lprobs)], dim=0)
+                    coeffs = torch.ones_like(lprobs)
+                    coeffs[0] = np.log(1 - self.args.lmbda)
+                    coeffs[1] = np.log(self.args.lmbda)
+                    lprobs = torch.logsumexp(lprobs + coeffs, dim=0)
+                else:
+                    if self.args.drop_lang_tok and step == 0:
+                        lprobs = lprobs
+                    else:
+                        if self.args.knn_backoff and (torch.exp(torch.max(knn_scores, dim=-1)[0]) < self.args.knn_backoff_thresh).any():
+                            #print(knn_scores)
+                            #print(knn_scores[torch.exp(torch.max(knn_scores, dim=-1)[0]) < 0.1])
+                            #print(lprobs[torch.exp(torch.max(knn_scores, dim=-1)[0]) < 0.1])
+                            #inds = torch.exp(torch.max(knn_scores, dim=-1)[0]) < 0.9
+                            knn_scores[torch.exp(torch.max(knn_scores, dim=-1)[0]) < self.args.knn_backoff_thresh] = lprobs[torch.exp(torch.max(knn_scores, dim=-1)[0]) < self.args.knn_backoff_thresh]
+                            #print("after")
+                            #print(knn_scores)
+                            #print(knn_scores[inds])
+                        lprobs = knn_scores
+ 
             lprobs[lprobs != lprobs] = torch.tensor(-math.inf).to(lprobs)
 
             lprobs[:, self.pad] = -math.inf  # never select pad
@@ -432,6 +503,10 @@ class SequenceGenerator(nn.Module):
                     attn,
                     src_lengths,
                     max_len,
+                    knnmt=self.args and self.args.knnmt and self.args.save_knns,
+                    knns=knns if self.args and self.args.save_knns else None,
+                    knn_vals=vals if self.args and self.args.save_knns else None,
+                    knn_probs=probs if self.args and self.args.save_knns else None,
                 )
                 num_remaining_sent -= len(finalized_sents)
 
@@ -607,6 +682,10 @@ class SequenceGenerator(nn.Module):
         attn: Optional[Tensor],
         src_lengths,
         max_len: int,
+        knnmt=False,
+        knns=None,
+        knn_vals=None,
+        knn_probs=None,
     ):
         """Finalize hypothesis, store finalized information in `finalized`, and change `finished` accordingly.
         A sentence is finalized when {beam_size} finished items have been collected for it.
@@ -637,6 +716,10 @@ class SequenceGenerator(nn.Module):
         pos_scores[:, step] = eos_scores
         # convert from cumulative to per-position scores
         pos_scores[:, 1:] = pos_scores[:, 1:] - pos_scores[:, :-1]
+        if knnmt:
+            knns = knns[bbsz_idx, :step+1]
+            knn_vals = knn_vals[bbsz_idx, :step+1]
+            knn_probs = knn_probs[bbsz_idx, :step+1]
 
         # normalize sentence-level scores
         if self.normalize_scores:
@@ -694,6 +777,9 @@ class SequenceGenerator(nn.Module):
                         "attention": hypo_attn,  # src_len x tgt_len
                         "alignment": torch.empty(0),
                         "positional_scores": pos_scores[i],
+                        "knns": knns[i].cpu().numpy() if knnmt else None,
+                        "vals": knn_vals[i].cpu().numpy() if knnmt else None,
+                        "probs": knn_probs[i].cpu().numpy() if knnmt else None,
                     }
                 )
 
@@ -773,7 +859,10 @@ class EnsembleModel(nn.Module):
         encoder_outs: List[Dict[str, List[Tensor]]],
         incremental_states: List[Dict[str, Dict[str, Optional[Tensor]]]],
         temperature: float = 1.0,
+        args=None,
     ):
+        if args.knnmt and len(self.models) > 1:
+            raise ValueError("Cannot use knnmt with actual ensembles!")
         log_probs = []
         avg_attn: Optional[Tensor] = None
         encoder_out: Optional[Dict[str, List[Tensor]]] = None
@@ -804,6 +893,8 @@ class EnsembleModel(nn.Module):
                         attn = attn_holder
                     elif attn_holder is not None:
                         attn = attn_holder[0]
+                    if args.knnmt:
+                        knn_queries = decoder_out[1][args.knn_keytype]
                 if attn is not None:
                     attn = attn[:, -1, :]
 
@@ -816,7 +907,11 @@ class EnsembleModel(nn.Module):
             )
             probs = probs[:, -1, :]
             if self.models_size == 1:
+                if args.knnmt:
+                    return probs, {"attn": attn, args.knn_keytype: knn_queries}
                 return probs, attn
+            elif args.knnmt:
+                raise ValueError("Cannot use with a real ensemble yet!")
 
             log_probs.append(probs)
             if attn is not None:
@@ -896,7 +991,6 @@ class SequenceGeneratorWithAlignment(SequenceGenerator):
     @torch.no_grad()
     def generate(self, models, sample, **kwargs):
         finalized = super()._generate(sample, **kwargs)
-
         src_tokens = sample["net_input"]["src_tokens"]
         bsz = src_tokens.shape[0]
         beam_size = self.beam_size

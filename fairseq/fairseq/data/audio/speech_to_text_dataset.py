@@ -372,6 +372,8 @@ class SpeechToTextDataset(FairseqDataset):
     def ordered_indices(self):
         if self.shuffle:
             order = [np.random.permutation(len(self))]
+            if self.args and hasattr(self.args, "save_knn_subset") and self.args.save_knn_subset:
+                return order
         else:
             order = [np.arange(len(self))]
         # first by descending order of # of frames then by original/random order
