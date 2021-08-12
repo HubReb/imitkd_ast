@@ -18,6 +18,7 @@ parser.add_argument('--num-shards', type=int, action='append', help='number of s
 parser.add_argument('--dstore-mmap', type=str, help='dstore location for datasets')
 parser.add_argument('--num-for-training', type=int, help='number of items to save per dataset for training the index')
 parser.add_argument('--code-size', type=int, default=64, help='size that vectors are quantized to')
+parser.add_argument('--decoder-dimension', type=int, default=256, help='size of the final decoder embedding layer')
 parser.add_argument('--ncentroids', type=int, action='append', help='number of faiss clusters')
 parser.add_argument('--train-index', type=str, action='append',  help='list of files to use for the trained faiss index, must be the same length as ncentroids')
 parser.add_argument('--faiss-index', type=str, action='append', help='list of files to use for the faiss index')
@@ -68,7 +69,7 @@ if args.train_index_job:
     size = len(args.save_data) * args.num_for_training
     for ncentroid, train_index in zip(args.ncentroids, args.train_index):
         print("Training index with %d centroids" % (ncentroid))
-        train_cmd = f"python train_index.py --dstore_mmap {dstore_mmap} --dstore_size {size} --dimension 1024 --code_size {args.code_size} --ncentroids {ncentroid} --train_index {train_index} --from_subset --gpu"
+        train_cmd = f"python train_index.py --dstore_mmap {dstore_mmap} --dstore_size {size} --dimension {args.decoder_dimension} --code_size {args.code_size} --ncentroids {ncentroid} --train_index {train_index} --from_subset --gpu"
         print(train_cmd)
 # TRAIN INDEX
 

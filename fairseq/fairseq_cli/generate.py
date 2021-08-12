@@ -229,6 +229,7 @@ def _main(cfg: DictConfig, output_file):
                             quantizer_gpu = faiss.index_cpu_to_all_gpus(quantizer, ngpu=1)
                             index_ivf.quantizer = quantizer_gpu
                 else:
+                    print(dstore_size, model.decoder.embed_dim)
                     dstore_keys = np.memmap(cfg.task.dstore_mmap+'_keys.npy', dtype=np.float32, mode='w+', shape=(dstore_size, model.decoder.embed_dim))
                     dstore_vals = np.memmap(cfg.task.dstore_mmap+'_vals.npy', dtype=np.int, mode='w+', shape=(dstore_size, 1))
 
@@ -320,7 +321,6 @@ def _main(cfg: DictConfig, output_file):
 
         for i, sample_id in enumerate(sample["id"].tolist()):
             has_target = sample["target"] is not None
-
             # Remove padding
             if "src_tokens" in sample["net_input"]:
                 src_tokens = utils.strip_pad(
@@ -539,9 +539,9 @@ def _main(cfg: DictConfig, output_file):
                     else:
                         scorer.add(target_tokens, hypo_tokens)
 
-            if cfg.knn_start > -1 and knn_num_samples_proc == cfg.knn_proc:
+            if cfg.task.knn_start > -1 and knn_num_samples_proc == cfg.knn_proc:
                 break
-            if cfg.save_knn_subset and total_saved >= cfg.save_knn_subset_num:
+            if cfg.task.save_knn_subset and total_saved >= cfg.task.save_knn_subset_num:
                 break
             #if i > 10:
             #    break
@@ -606,7 +606,7 @@ def _main(cfg: DictConfig, output_file):
             1.0 / gen_timer.avg,
         )
     )
-    if has_target:
+    if has_target and not cfg.generation.score_reference:
         if cfg.bpe and not cfg.generation.sacrebleu:
             if cfg.common_eval.post_process:
                 logger.warning(
