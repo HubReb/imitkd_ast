@@ -158,7 +158,8 @@ class CoVoST(Dataset):
         self.data = []
         for e in data:
             try:
-                path = self.root / "clips" / e["path"].replace("mp3", "wav")
+                e["path"] = e["path"].replace(".mp3", ".wav")
+                path = self.root / "clips" / e["path"]
                 _ = torchaudio.info(path.as_posix())
                 self.data.append(e)
             except RuntimeError:
@@ -182,7 +183,7 @@ class CoVoST(Dataset):
         sentence = data["sentence"]
         translation = None if self.no_translation else data["translation"]
         speaker_id = data["client_id"]
-        _id = data["path"].replace(".mp3", "")
+        _id = data["path"].replace(".wav", "")
         return waveform, sample_rate, sentence, translation, speaker_id, _id
 
     def __len__(self) -> int:
