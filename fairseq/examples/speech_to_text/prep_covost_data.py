@@ -158,7 +158,7 @@ class CoVoST(Dataset):
         self.data = []
         for e in data:
             try:
-                path = self.root / "clips" / e["path"]
+                path = self.root / "clips" / e["path"].replace("mp3", "wav")
                 _ = torchaudio.info(path.as_posix())
                 self.data.append(e)
             except RuntimeError:
