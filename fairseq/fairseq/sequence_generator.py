@@ -260,6 +260,7 @@ class SequenceGenerator(nn.Module):
             self.min_len <= max_len
         ), "min_len cannot be larger than max_len, please adjust these!"
         # compute the encoder output for each beam
+        print(net_input)
         encoder_outs = self.model.forward_encoder(net_input)
 
         # placeholder of indices for bsz * beam_size to hold tokens and accumulative scores
@@ -860,8 +861,9 @@ class EnsembleModel(nn.Module):
         temperature: float = 1.0,
         args=None,
     ):
-        if args.knnmt and len(self.models) > 1:
-            raise ValueError("Cannot use knnmt with actual ensembles!")
+        if args:
+            if args.knnmt and len(self.models) > 1:
+                raise ValueError("Cannot use knnmt with actual ensembles!")
         log_probs = []
         avg_attn: Optional[Tensor] = None
         encoder_out: Optional[Dict[str, List[Tensor]]] = None
@@ -892,8 +894,9 @@ class EnsembleModel(nn.Module):
                         attn = attn_holder
                     elif attn_holder is not None:
                         attn = attn_holder[0]
-                    if args.knnmt:
-                        knn_queries = decoder_out[1][args.knn_keytype]
+                    if args:
+                        if args.knnmt:
+                            knn_queries = decoder_out[1][args.knn_keytype]
                 if attn is not None:
                     attn = attn[:, -1, :]
 
@@ -906,11 +909,13 @@ class EnsembleModel(nn.Module):
             )
             probs = probs[:, -1, :]
             if self.models_size == 1:
-                if args.knnmt:
-                    return probs, {"attn": attn, args.knn_keytype: knn_queries}
+                if args:
+                    if args.knnmt:
+                        return probs, {"attn": attn, args.knn_keytype: knn_queries}
                 return probs, attn
-            elif args.knnmt:
-                raise ValueError("Cannot use with a real ensemble yet!")
+            elif args:
+                if args.knnmt:
+                    raise ValueError("Cannot use with a real ensemble yet!")
 
             log_probs.append(probs)
             if attn is not None:
