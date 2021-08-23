@@ -53,6 +53,7 @@ class FairseqCriterion(_Loss):
             elif p.default != p.empty:
                 pass  # we'll use the default value
             else:
+                print(p)
                 raise NotImplementedError(
                     "Unable to infer Criterion arguments, please implement "
                     "{}.build_criterion".format(cls.__name__)
