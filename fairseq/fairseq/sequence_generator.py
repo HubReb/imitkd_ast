@@ -67,7 +67,6 @@ class SequenceGenerator(nn.Module):
                 length (default: False)
         """
         super().__init__()
-        print("SequenceGenerator: ", args)
         if isinstance(models, EnsembleModel):
             self.model = models
         else:
@@ -381,7 +380,7 @@ class SequenceGenerator(nn.Module):
                         queries,
                         lprobs.shape[-1],
                         self.pad,
-                        use_dtype=torch.float16 if self.args.fp16 else torch.float32,
+                        use_dtype=torch.float16 if self.args.dstore_fp16 else torch.float32,
                         save_knns=self.args.save_knns,
                         knn_temp=self.args.knn_temp)
 

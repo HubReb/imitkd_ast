@@ -373,10 +373,10 @@ def add_generation_args(parser):
                        help='the position to start faiss ids for the keys, important when adding to one index from many different train files')
     group.add_argument('--knn-add-idx-pos-in-dataset', type=int,
                        help='number of tokens to skip in the dataset')
-#    group.add_argument('--trained-index', type=str, action='append',
-#                       help='trained faiss index')
-#    group.add_argument('--write-index', type=str, action='append',
-#                       help='file to write index with added keys')
+    group.add_argument('--trained-index', type=str,
+                       help='trained faiss index')
+    group.add_argument('--write-index', type=str,
+                       help='file to write index with added keys')
     group.add_argument('--knn-q2gpu', action='store_true', default=False,
                        help='move the quantizer from faiss to gpu')
     group.add_argument('--drop-lang-tok', action='store_true', default=False,

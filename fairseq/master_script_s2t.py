@@ -57,7 +57,7 @@ if args.save_job:
 if args.merge_dstore_job:
     print("Merging subsets saved for training")
     num_datasets = len(args.save_data)
-    merge_subset_cmd = f"python merge_subset_dstores.py --dstore_mmap {args.dstore_mmap} --num_datasets {num_datasets} --size {args.num_for_training}"
+    merge_subset_cmd = f"python merge_subset_dstores.py --dstore_mmap {args.dstore_mmap} --num_datasets {num_datasets} --size {args.num_for_training} --dimension {args.decoder_dimension}"
     print(merge_subset_cmd)
 # MERGE SUBSET KEYS/VALUES
 
@@ -68,7 +68,7 @@ if args.train_index_job:
     dstore_mmap = args.dstore_mmap + ".subset"
     size = len(args.save_data) * args.num_for_training
     for ncentroid, train_index in zip(args.ncentroids, args.train_index):
-        print("Training index with %d centroids" % (ncentroid))
+        print("echo \"Training index with %d centroids\"" % (ncentroid))
         train_cmd = f"python train_index.py --dstore_mmap {dstore_mmap} --dstore_size {size} --dimension {args.decoder_dimension} --code_size {args.code_size} --ncentroids {ncentroid} --train_index {train_index} --from_subset --gpu"
         print(train_cmd)
 # TRAIN INDEX
@@ -93,8 +93,8 @@ if args.add_keys_job:
             print(add_cmd)
             index_id += 1 # remember this is 1 greater than the actual ids for indices, i.e. there are index_id number of indices but the last one is index_id - 1.
 
-        print("Number of indices for this dataset %d" % (index_id))
-    print("Total keys meant to be added = %d" % (sum(dstore_size)))
+        print("echo \"Number of indices for this dataset %d\"" % (index_id))
+    print("echo \"Total keys meant to be added = %d\"" % (sum(dstore_size)))
 
 
     for job in add_jobs:
@@ -104,7 +104,7 @@ if args.add_keys_job:
 # MERGE FAISS INDICES
 if args.merge_index_job:
     merge_index_jobs = []
-    print('Merging indices')
+    print('echo "Merging indices"')
     corpus_identifiers = " ".join([f"--corpus_identifiers {cid}" for cid in args.corpus_identifiers])
     num_shards = " ".join([f"--num_shards_per_file {ns}" for ns in args.num_shards])
     for tindex, findex, wmindex in zip(args.train_index, args.faiss_index, args.write_merged_index):

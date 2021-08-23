@@ -16,6 +16,8 @@ from argparse import Namespace
 from itertools import chain
 
 import numpy as np
+import faiss
+
 import torch
 from fairseq import checkpoint_utils, options, scoring, tasks, utils
 from fairseq.dataclass.utils import convert_namespace_to_omegaconf
@@ -201,11 +203,11 @@ def _main(cfg: DictConfig, output_file):
                 print('Saving fp16')
                 if cfg.task.knn_add_to_idx:
                     faiss_indices = []
-                    for tindex in cfg.task.trained_index:
+                    for tindex in [cfg.task.trained_index]:
                         print("Reading trained index from %s" % tindex)
                         faiss_indices.append(faiss.read_index(tindex))
                         if cfg.task.knn_q2gpu:
-                            assert len(cfg.task.trained_index) == 1
+                            assert len([cfg.task.trained_index]) == 1
                             print("Moving quantizer to GPU")
                             index_ivf = faiss.extract_index_ivf(faiss_indices[0])
                             quantizer = index_ivf.quantizer
@@ -218,11 +220,11 @@ def _main(cfg: DictConfig, output_file):
                 print('Saving fp32')
                 if cfg.task.knn_add_to_idx:
                     faiss_indices = []
-                    for tindex in cfg.task.trained_index:
+                    for tindex in [cfg.task.trained_index]:
                         print("Reading trained index from %s" % tindex)
                         faiss_indices.append(faiss.read_index(tindex))
                         if cfg.task.knn_q2gpu:
-                            assert len(cfg.task.trained_index) == 1
+                            assert len([cfg.task.trained_index]) == 1
                             print("Moving quantizer to GPU")
                             index_ivf = faiss.extract_index_ivf(faiss_indices[0])
                             quantizer = index_ivf.quantizer
@@ -551,7 +553,7 @@ def _main(cfg: DictConfig, output_file):
             break
         if cfg.task.knn_add_to_idx:
             adding_to_faiss += keys.shape[0]
-            for fidx in range(len(cfg.trained_index)):
+            for fidx in range(len([cfg.task.trained_index])):
                 faiss_indices[fidx].add_with_ids(keys, addids)
             #print(f"loop time {time.time()-knn_start_loop}s")
 
@@ -587,7 +589,7 @@ def _main(cfg: DictConfig, output_file):
             print("Keys", dstore_keys.shape, dstore_keys.dtype)
             print("Vals", dstore_vals.shape, dstore_vals.dtype)
         else:
-            for widx, write_index in enumerate(cfg.task.write_index):
+            for widx, write_index in enumerate([cfg.task.write_index]):
                 faiss.write_index(faiss_indices[widx], write_index)
                 print("Added to faiss", adding_to_faiss)
                 #print("Final global position %d" % global_end)

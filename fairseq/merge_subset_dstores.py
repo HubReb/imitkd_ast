@@ -33,9 +33,6 @@ if args.langs:
 else:
     for i in range(args.num_datasets):
         filename = args.dstore_mmap + ".subset." + str(i)
-        print(filename)
-        print(args.num_datasets, args.size, args.num_langs, args.dimension)
-        print(args.size, args.dimension)
         keys = np.memmap(filename + "_keys.npy", dtype=np.float32, mode='r', shape=(args.size, args.dimension))
         vals = np.memmap(filename + "_vals.npy", dtype=np.int, mode='r', shape=(args.size, 1))
         dstore_keys[i*args.size:i*args.size+args.size] = keys[:]

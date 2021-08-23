@@ -7,7 +7,7 @@ from fairseq.data import Dictionary
 
 class KNN_Dstore(object):
     def __init__(self, args):
-        self.half = args.fp16
+        self.half = args.dstore_fp16
         if hasattr(args, "decoder_embed_dim"):
             self.dimension = args.decoder_embed_dim
         else:
@@ -39,7 +39,6 @@ class KNN_Dstore(object):
 
         if self.use_faiss_only:
             return index
-
         if args.dstore_fp16:
             print('Keys are fp16 and vals are int16')
             if not args.no_load_keys:
