@@ -481,10 +481,11 @@ class Trainer(object):
                 # save memory for later steps
                 del state["model"]
                 if utils.has_parameters(self.get_criterion()):
-                    self.get_criterion().load_state_dict(
-                        state["criterion"], strict=True
-                    )
-                    del state["criterion"]
+                    if state["criterion"]:
+                        self.get_criterion().load_state_dict(
+                            state["criterion"], strict=True
+                        )
+                        del state["criterion"]
 
             except Exception:
                 raise Exception(
