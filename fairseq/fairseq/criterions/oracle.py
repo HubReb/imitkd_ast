@@ -46,7 +46,7 @@ class OracleForcedDecodingConfig(FairseqDataclass):
         metadata={"help": "directory with expert's dictionaries"},
     )
     entire_sentence: bool = field(
-        default=True,
+        default=False,
         metadata={"help": "whether to complete entire sentence instead of sampling one word"},
     )
 
@@ -82,12 +82,11 @@ def knn_forced_loss(
         index = randint(1, len(prediction_string.split())-1)
         indices.append(index)
         prediction_string = " ".join(prediction_string.split()[:index])
-        print(prediction_string)
         text_predictions.append(prediction_string)
         prediction_string_in_expert_vocab = expert_vocab_tgt.encode_line(
                 prediction_string, add_if_not_exist=False, append_eos=False
                 )
-        print(prediction_string_in_expert_vocab)
+        print(prediction_string)
         student_predictions.append(prediction_string_in_expert_vocab.tolist())
     # https://stackoverflow.com/questions/18741633/calculating-minimum-length-among-the-lists-inside-a-list
     expert_input = torch.LongTensor(student_predictions)
@@ -96,15 +95,15 @@ def knn_forced_loss(
     for line in source_text:
         if type(line) == list:
             for text in line:
-                source_texts.append(expert_vocab_src.encode_line(text, add_if_not_exist=False, append_eos=False))
+                source_texts.append(expert_vocab_src.encode_line(text, add_if_not_exist=False, append_eos=True))
         else:
-            source_texts = expert_vocab_src.encode_line(line, add_if_not_exist=False, append_eos=False).view(batch_size, -1)
+            source_texts = expert_vocab_src.encode_line(line, add_if_not_exist=False, append_eos=True).view(batch_size, -1)
     out = {
         "id": sample["id"],
         "net_input": {
             "src_tokens": source_texts.cuda(),
             "src_lengths": [len(text) for text in source_text],
-            "prev_output_tokens": sample["net_input"]["prev_output_tokens"],
+            "prev_output_tokens": [],
         },
         "target": sample["target"],
         "target_lengths": sample["target_lengths"],
@@ -130,11 +129,15 @@ def knn_forced_loss(
             bpe_symbol="@@",
             escape_unk=True
         )
-        # print(expert_output_string)
+        print(expert_output_string)
         if entire_sentence:
             line = expert_output_string
         else:
-            line = text_predictions[index] + " " + expert_output_string.split()[indices[index]]
+            if not len(text_predictions[index].split()) == len(expert_output_string.split()):
+                line = text_predictions[index] + " " + expert_output_string.split()[indices[index]]
+            else:
+                # expert failed to complete student's input - nothing to take from this
+                continue
         # print(line)
         new_student_input = model_vocab.encode_line(
             line,
@@ -152,10 +155,7 @@ def knn_forced_loss(
     net_output = student(
         **sample["net_input"]
     )
-    print(sample["net_input"]["prev_output_tokens"])
     lprobs_new = student.get_normalized_probs(net_output, log_probs=True)
-    print(lprobs_new.shape)
-    print(target.shape)
     if ignore_prefix_size > 0:
         if getattr(lprobs, "batch_first", False):
             lprobs_new = lprobs_new[:, ignore_prefix_size:, :].contiguous()
@@ -202,13 +202,13 @@ class OracleForcedDecoding(FairseqCriterion):
         self.report_accuracy = report_accuracy
         self.expert, _ = load_model_ensemble([expert], arg_overrides={"data": path})
         self.expert = self.expert[-1]
-        self.expert.requires_grad = False
         self.expert_vocab_src = Dictionary.load(expert_vocab_src)
         self.expert_vocab_tgt = Dictionary.load(expert_vocab_tgt)
         self.expert = SequenceGenerator(
                 [self.expert],
                 self.expert_vocab_tgt
         )
+        self.expert.requires_grad = False
         self.dict = task.tgt_dict
         self.sentence_avg = False
         self.entire_sentence = entire_sentence
@@ -274,7 +274,6 @@ class OracleForcedDecoding(FairseqCriterion):
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
         lprobs = lprobs.view(-1, lprobs.size(-1))
         mask = target.ne(self.padding_idx)
-        print(lprobs.shape, mask.shape, target.shape)
         n_correct = torch.sum(
             lprobs.argmax(1).masked_select(mask).eq(target.masked_select(mask))
         )
