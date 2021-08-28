@@ -79,17 +79,20 @@ def knn_forced_loss(
             bpe_symbol="sentencepiece",
             escape_unk=True
         )
-        index = randint(1, len(prediction_string.split())-1)
+        max_range = len(prediction_string.split())-1
+        if max_range <= 1:
+            index = 1
+        else:
+            index = randint(1, len(prediction_string.split())-1)
         indices.append(index)
         prediction_string = " ".join(prediction_string.split()[:index])
         text_predictions.append(prediction_string)
         prediction_string_in_expert_vocab = expert_vocab_tgt.encode_line(
                 prediction_string, add_if_not_exist=False, append_eos=False
                 )
-        print(prediction_string)
-        student_predictions.append(prediction_string_in_expert_vocab.tolist())
-    # https://stackoverflow.com/questions/18741633/calculating-minimum-length-among-the-lists-inside-a-list
-    expert_input = torch.LongTensor(student_predictions)
+        # print("student: ", prediction_string)
+        student_predictions.append(torch.LongTensor(prediction_string_in_expert_vocab.tolist()))
+    expert_input = torch.nn.utils.rnn.pad_sequence(student_predictions, batch_first=True, padding_value=ignore_index)
     source_text = sample["net_input"]["src_text"]
     source_texts = []
     for line in source_text:
@@ -97,7 +100,8 @@ def knn_forced_loss(
             for text in line:
                 source_texts.append(expert_vocab_src.encode_line(text, add_if_not_exist=False, append_eos=True))
         else:
-            source_texts = expert_vocab_src.encode_line(line, add_if_not_exist=False, append_eos=True).view(batch_size, -1)
+            source_texts.append(expert_vocab_src.encode_line(line, add_if_not_exist=False, append_eos=True))
+    source_texts = torch.nn.utils.rnn.pad_sequence(source_texts, padding_value=ignore_index, batch_first=True)
     out = {
         "id": sample["id"],
         "net_input": {
@@ -118,18 +122,25 @@ def knn_forced_loss(
     )
     # get best
     if type(expert_output[0]) != dict:
-        expert_output = expert_output[0][0]["tokens"].view(batch_size, -1)
+        expert_output_samples = []
+        for expert_sample in expert_output:
+            expert_output_samples.append(expert_sample[0]["tokens"])
     else:
-        expert_output = expert_output[0]["tokens"].view(batch_size, -1)
+        expert_output_samples = []
+        for expert_sample in expert_output:
+            expert_output_samples.append(expert_sample["tokens"])
+    # print(expert_output_samples, batch_size)
+    expert_output = torch.nn.utils.rnn.pad_sequence(expert_output_samples, padding_value=ignore_index, batch_first=True)
     # print(sample["net_input"]["prev_output_tokens"])
+    # print(expert_output.shape)
     for index, output in enumerate(expert_output):
-        # print(output)
+        # print(index)
         expert_output_string = expert_vocab_tgt.string(
             utils.strip_pad(output, ignore_index),
             bpe_symbol="@@",
             escape_unk=True
         )
-        print(expert_output_string)
+        # print(expert_output_string)
         if entire_sentence:
             line = expert_output_string
         else:
@@ -146,10 +157,10 @@ def knn_forced_loss(
         )
         if entire_sentence:
             new_student_input = new_student_input.tolist()
-            while len(new_student_input) < sample["target_lengths"][index]-1:
+            while len(new_student_input) < len(sample["net_input"]["prev_output_tokens"][index]):
                 new_student_input.append(ignore_index)
             new_student_input = torch.LongTensor(new_student_input)
-            sample["net_input"]["prev_output_tokens"][index, 1:] = new_student_input[:sample["target_lengths"][index]-1].cuda()
+            sample["net_input"]["prev_output_tokens"][index, 1:] = new_student_input[:len(sample["net_input"]["prev_output_tokens"][index])-1].cuda()
         else:
             sample["net_input"]["prev_output_tokens"][index, 1:indices[index]+2] = new_student_input.cuda()
     net_output = student(
@@ -272,6 +283,7 @@ class OracleForcedDecoding(FairseqCriterion):
 
     def compute_accuracy(self, model, net_output, sample):
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
+        target = target.view(-1)
         lprobs = lprobs.view(-1, lprobs.size(-1))
         mask = target.ne(self.padding_idx)
         n_correct = torch.sum(
