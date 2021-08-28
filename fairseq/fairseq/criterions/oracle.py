@@ -64,8 +64,21 @@ def knn_forced_loss(
         entire_sentence,
         ignore_prefix_size,
         ignore_index=None,
-        reduce=True
+        reduce=True,
+        valid=False
         ):
+    if valid:
+        if target.dim() == lprobs.dim() - 1:
+            target = target.unsqueeze(-1)
+        nll_loss = -lprobs.gather(dim=-1, index=target)
+        if ignore_index is not None:
+            pad_mask = target.eq(ignore_index)
+            nll_loss.masked_fill_(pad_mask, 0.0)
+        else:
+            nll_loss = nll_loss.squeeze(-1)
+        if reduce:
+            nll_loss = nll_loss.sum()
+        return nll_loss, nll_loss
     if target.dim() == lprobs.dim() - 1:
         target = target.unsqueeze(-1)
     batch_size = target.shape[0]
@@ -225,7 +238,7 @@ class OracleForcedDecoding(FairseqCriterion):
         self.entire_sentence = entire_sentence
 
 
-    def forward(self, model, sample, reduce=True):
+    def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
 
         Returns a tuple with three elements:
@@ -234,7 +247,7 @@ class OracleForcedDecoding(FairseqCriterion):
         3) logging outputs to display while training
         """
         net_output = model(**sample["net_input"])
-        loss, nll_loss = self.compute_loss(model, net_output, sample, reduce=reduce)
+        loss, nll_loss = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
         sample_size = (
             sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
         )
@@ -263,7 +276,7 @@ class OracleForcedDecoding(FairseqCriterion):
                 target = target[self.ignore_prefix_size :, :].contiguous()
         return lprobs, target
 
-    def compute_loss(self, model, net_output, sample, reduce=True):
+    def compute_loss(self, model, net_output, sample, reduce=True, valid=False):
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
         loss = knn_forced_loss(
             self.expert,
@@ -278,6 +291,7 @@ class OracleForcedDecoding(FairseqCriterion):
             self.ignore_prefix_size,
             ignore_index=self.padding_idx,
             reduce=reduce,
+            valid=valid
         )
         return loss
 

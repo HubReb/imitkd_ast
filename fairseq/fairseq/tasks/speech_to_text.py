@@ -7,6 +7,8 @@ import logging
 import os.path as op
 from argparse import Namespace
 
+import torch
+
 from fairseq.data import Dictionary, encoders
 from fairseq.data.audio.speech_to_text_dataset import (
     S2TDataConfig,
@@ -174,3 +176,12 @@ class SpeechToTextTask(LegacyFairseqTask):
         return SpeechToTextDataset(
             "interactive", False, self.data_cfg, src_tokens, src_lengths
         )
+
+    def valid_step(self, sample, model, criterion):
+        model.eval()
+        with torch.no_grad():
+            if str(type(criterion)).endswith("OracleForcedDecoding'>"):
+                loss, sample_size, logging_output = criterion(model, sample, valid=True)
+            else:
+                loss, sample_size, logging_output = criterion(model, sample)
+        return loss, sample_size, logging_output
