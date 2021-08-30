@@ -85,12 +85,12 @@ def knn_forced_loss(
     student_output = lprobs.argmax(dim=-1)
     student_predictions = []
     text_predictions = []
+    texts = []
     indices = []
     for prediction in student_output:
         prediction_string = model_vocab.string(
             utils.strip_pad(prediction, ignore_index),
             bpe_symbol="sentencepiece",
-            escape_unk=True
         )
         max_range = len(prediction_string.split())-1
         if max_range <= 1:
@@ -98,13 +98,24 @@ def knn_forced_loss(
         else:
             index = randint(1, len(prediction_string.split())-1)
         indices.append(index)
+        texts.append(prediction_string)
         prediction_string = " ".join(prediction_string.split()[:index])
-        text_predictions.append(prediction_string)
         prediction_string_in_expert_vocab = expert_vocab_tgt.encode_line(
                 prediction_string, add_if_not_exist=False, append_eos=False
                 )
+        if expert_vocab_tgt.unk() in prediction_string_in_expert_vocab:
+            indices.pop()
+            new_index = prediction_string_in_expert_vocab.tolist().index(expert_vocab_tgt.unk())
+            prediction_string = expert_vocab_tgt.string(
+                    utils.strip_pad(prediction_string_in_expert_vocab[:new_index], ignore_index),
+                    bpe_symbol="fastBPE"
+            )
+            indices.append(len(prediction_string.split()))
+            prediction_string_in_expert_vocab = prediction_string_in_expert_vocab[:new_index]
         # print("student: ", prediction_string)
-        student_predictions.append(torch.LongTensor(prediction_string_in_expert_vocab.tolist()))
+        # print(prediction_string_in_expert_vocab)
+        text_predictions.append(prediction_string)
+        student_predictions.append(prediction_string_in_expert_vocab.to(torch.int64))
     expert_input = torch.nn.utils.rnn.pad_sequence(student_predictions, batch_first=True, padding_value=ignore_index)
     source_text = sample["net_input"]["src_text"]
     source_texts = []
@@ -150,10 +161,10 @@ def knn_forced_loss(
         # print(index)
         expert_output_string = expert_vocab_tgt.string(
             utils.strip_pad(output, ignore_index),
-            bpe_symbol="@@",
-            escape_unk=True
+            bpe_symbol="fastBPE",
         )
-        # print(expert_output_string)
+        print(texts[index])
+        print(expert_output_string)
         if entire_sentence:
             line = expert_output_string
         else:

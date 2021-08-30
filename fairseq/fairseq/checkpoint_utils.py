@@ -289,7 +289,7 @@ def load_checkpoint_to_cpu(path, arg_overrides=None, load_on_all_ranks=False):
         if load_on_all_ranks:
             torch.distributed.barrier()
         local_path = PathManager.get_local_path(path)
-
+    print(local_path)
     with open(local_path, "rb") as f:
         state = torch.load(f, map_location=torch.device("cpu"))
 
