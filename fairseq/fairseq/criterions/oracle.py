@@ -49,7 +49,11 @@ class OracleForcedDecodingConfig(FairseqDataclass):
         default=False,
         metadata={"help": "whether to complete entire sentence instead of sampling one word"},
     )
-
+    avoid_unk: bool = field(
+        default=False,
+        metadata={"help": "whether to split the model prediction before the first unknown"},
+    )
+ 
 
 
 def knn_forced_loss(
@@ -65,7 +69,8 @@ def knn_forced_loss(
         ignore_prefix_size,
         ignore_index=None,
         reduce=True,
-        valid=False
+        valid=False,
+        avoid_unk=True
         ):
     if valid:
         if target.dim() == lprobs.dim() - 1:
@@ -103,7 +108,7 @@ def knn_forced_loss(
         prediction_string_in_expert_vocab = expert_vocab_tgt.encode_line(
                 prediction_string, add_if_not_exist=False, append_eos=False
                 )
-        if expert_vocab_tgt.unk() in prediction_string_in_expert_vocab:
+        if expert_vocab_tgt.unk() in prediction_string_in_expert_vocab and avoid_unk:
             indices.pop()
             new_index = prediction_string_in_expert_vocab.tolist().index(expert_vocab_tgt.unk())
             prediction_string = expert_vocab_tgt.string(
@@ -163,22 +168,29 @@ def knn_forced_loss(
             utils.strip_pad(output, ignore_index),
             bpe_symbol="fastBPE",
         )
-        print(texts[index])
-        print(expert_output_string)
+        print("student prediction: ", texts[index])
+        print("expert prediction: ", expert_output_string)
+        print("index: ", indices[index])
         if entire_sentence:
             line = expert_output_string
+            new_student_input = model_vocab.encode_line(
+                line,
+                add_if_not_exist=False,
+                append_eos=True
+            )
         else:
             if not len(text_predictions[index].split()) == len(expert_output_string.split()):
                 line = text_predictions[index] + " " + expert_output_string.split()[indices[index]]
+                new_student_input = model_vocab.encode_line(
+                    line,
+                    add_if_not_exist=False,
+                    append_eos=False
+                )
             else:
                 # expert failed to complete student's input - nothing to take from this
                 continue
         # print(line)
-        new_student_input = model_vocab.encode_line(
-            line,
-            add_if_not_exist=False,
-            append_eos=False
-        )
+
         if entire_sentence:
             new_student_input = new_student_input.tolist()
             while len(new_student_input) < len(sample["net_input"]["prev_output_tokens"][index]):
@@ -229,6 +241,7 @@ class OracleForcedDecoding(FairseqCriterion):
         expert_vocab_tgt,
         path,
         entire_sentence,
+        avoid_unk,
         ignore_prefix_size=0,
         report_accuracy=False,
     ):
@@ -247,6 +260,7 @@ class OracleForcedDecoding(FairseqCriterion):
         self.dict = task.tgt_dict
         self.sentence_avg = False
         self.entire_sentence = entire_sentence
+        self.avoid_unk = avoid_unk
 
 
     def forward(self, model, sample, reduce=True, valid=False):
@@ -302,7 +316,8 @@ class OracleForcedDecoding(FairseqCriterion):
             self.ignore_prefix_size,
             ignore_index=self.padding_idx,
             reduce=reduce,
-            valid=valid
+            valid=valid,
+            avoid_unk=self.avoid_unk
         )
         return loss
 
