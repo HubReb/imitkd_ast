@@ -77,7 +77,17 @@ def knn_forced_loss(
     probs = torch.nn.functional.softmax(avg_scores.exp_())
     reward_to_go_student = torch.sigmoid(sample_student["reward_to_go"])
     reward = torch.sigmoid(sample_expert["reward_to_go"] - sample_student["reward_to_go"])
-    loss = (probs * ((reward_to_go_student - reward)**2).type_as(probs)).sum()
+    indicator = []
+    for i, reward_row in enumerate(sample_student["reward_to_go"]):
+        indicator_row = []
+        for j, r in enumerate(reward_row):
+            if r > sample_expert["reward_to_go"][i][j]:
+                indicator_row.append(0)
+            else:
+                indicator_row.append(1)
+        indicator.append(indicator_row)
+    indicator = torch.LongTensor(indicator).cuda()
+    loss = (probs * indicator * ((reward_to_go_student - reward)**2).type_as(probs)).sum()
     return loss
 
 
@@ -306,7 +316,7 @@ class OracleForcedDecodingMNT(FairseqCriterion):
             for i, hypos_i in enumerate(hypos):
                 ref = utils.strip_pad(target[i, :], self.pad_idx).cpu()
                 r = self.dict.string(ref, bpe_symbol='sentencepiece', escape_unk=True)
-                r = self.dict.encode_line(r, add_if_not_exist=False)
+                r = self.expert_vocab_tgt.encode_line(r, add_if_not_exist=False)
                 for hypo in hypos_i:
                     h = self.expert_vocab_tgt.string(hypo['tokens'].int().cpu(), bpe_symbol='fastBPE')
                     h = self.expert_vocab_tgt.encode_line(h, add_if_not_exist=False)
