@@ -482,9 +482,11 @@ class Trainer(object):
                 del state["model"]
                 if utils.has_parameters(self.get_criterion()):
                     if state["criterion"]:
-                        self.get_criterion().load_state_dict(
-                            state["criterion"], strict=True
-                        )
+                        for key in state["criterion"].keys():
+                            if "expert" not in key:
+                                self.get_criterion().load_state_dict(
+                                    state["criterion"], strict=True
+                                )
                         del state["criterion"]
 
             except Exception:
