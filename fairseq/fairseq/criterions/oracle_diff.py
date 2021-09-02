@@ -73,8 +73,9 @@ def knn_forced_loss(
         sample_expert,
         lengths
         ):
-    avg_scores = scores.sum(2)/lengths
-    probs = torch.nn.functional.softmax(avg_scores.exp_())
+    # avg_scores = scores.sum(2)/lengths
+    # probs = torch.nn.functional.softmax(avg_scores.exp_())
+    probs = scores
     reward_to_go_student = torch.sigmoid(sample_student["reward_to_go"])
     reward = torch.sigmoid(sample_expert["reward_to_go"] - sample_student["reward_to_go"])
     indicator = []
@@ -94,7 +95,7 @@ def knn_forced_loss(
 @register_criterion(
     "oracle_diff", dataclass=OracleDiffConfig
 )
-class OracleForcedDecodingMNT(FairseqCriterion):
+class OracleDiff(FairseqCriterion):
     def __init__(
         self,
         task,
@@ -341,7 +342,7 @@ class OracleForcedDecodingMNT(FairseqCriterion):
 
     def get_student_predictions_and_pass_to_expert(self, model, target, sample):
         student_predictions = []
-        student_generator = SequenceGenerator([model], self.dict, beam_size=5)
+        student_generator = SequenceGenerator([model], self.dict, beam_size=1)
         student_generator.cuda()
         hypos = student_generator._generate(sample)
         texts = []
@@ -417,7 +418,7 @@ class OracleForcedDecodingMNT(FairseqCriterion):
         expert_generator = SequenceGenerator(
                 [self.expert],
                 self.expert_vocab_tgt,
-                beam_size=5
+                beam_size=1
         )
         expert_output = expert_generator.generate(
             [self.expert],
@@ -433,10 +434,7 @@ class OracleForcedDecodingMNT(FairseqCriterion):
         sample_student = self.update_sample_with_hypos(sample_student, hypos_student)
         sample_expert = self.update_sample_with_hypos(sample_expert, hypos_expert)
         bzw, _, vocab_len = lprobs.size()
-        if sample['hypotheses'].shape[0] > 1:
-            lengths = Variable(sample_student['hypotheses'].view(bzw, 5, -1).ne(self.dict.pad()).sum(2).float(), requires_grad=False)
-        else: # we only got one beam for some reason
-            lengths = Variable(sample_student['hypotheses'].view(bzw, 1, -1).ne(self.dict.pad()).sum(2).float(), requires_grad=False)
+        lengths = Variable(sample_student['hypotheses'].view(bzw, 1, -1).ne(self.dict.pad()).sum(2).float(), requires_grad=False)
         scores = self.get_hypothesis_scores(lprobs, sample)
         return scores, sample_student, sample_expert, lengths
  
@@ -444,12 +442,8 @@ class OracleForcedDecodingMNT(FairseqCriterion):
     def get_hypothesis_scores(self, lprobs, sample):
         hypotheses = Variable(sample['hypotheses'], requires_grad=False)
         bzw, target_len, vocab_len = lprobs.size()
-        if hypotheses.shape[0] > 1:
-            hypotheses = hypotheses.view(bzw, 5, -1, 1)
-            net_output = lprobs.repeat(1, 5, 1, 1).view(bzw, 5, -1, vocab_len)
-        else: # we only got one beam for some reason
-            hypotheses = hypotheses.view(bzw, 1, -1, 1)
-            net_output = lprobs.repeat(1, 1, 1, 1).view(bzw, 1, -1, vocab_len)
+        hypotheses = hypotheses.view(bzw, 1, -1, 1)
+        net_output = lprobs.repeat(1, 1, 1, 1).view(bzw, 1, -1, vocab_len)
         h_shape = hypotheses.shape[2]
         n_shape = net_output.shape[2]
         if h_shape > n_shape:

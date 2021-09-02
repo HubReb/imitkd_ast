@@ -428,9 +428,9 @@ class OracleForcedDecodingMNT(FairseqCriterion):
                 utils.strip_pad(output, self.expert_vocab_tgt.pad()),
                 bpe_symbol="fastBPE",
             )
-            print("student prediction: ", text_predictions[index])
-            print("expert prediction: ", expert_output_string)
-            print("index: ", indices[index])
+            # print("student prediction: ", text_predictions[index])
+            # print("expert prediction: ", expert_output_string)
+            # print("index: ", indices[index])
             if not len(cut_predictions[index].split()) == len(expert_output_string.split()):
                 line = cut_predictions[index] + " " + " ".join(expert_output_string.split()[indices[index]:indices[index]+self.guidance+1])
             else:
@@ -454,10 +454,7 @@ class OracleForcedDecodingMNT(FairseqCriterion):
         sample, hypos = self.prepare_sample_and_hypotheses(model, sample, hypos)
         sample = self.update_sample_with_hypos(sample, hypos)
         bzw, target_len, vocab_len = lprobs.size()
-        if sample['hypotheses'].shape[0] > 1:
-            lengths = Variable(sample['hypotheses'].view(bzw, 5, -1).ne(self.dict.pad()).sum(2).float(), requires_grad=False)
-        else: # we only got one beam for some reason
-            lengths = Variable(sample['hypotheses'].view(bzw, 1, -1).ne(self.dict.pad()).sum(2).float(), requires_grad=False)
+        lengths = Variable(sample['hypotheses'].view(bzw, 5, -1).ne(self.dict.pad()).sum(2).float(), requires_grad=False)
         scores = self.get_hypothesis_scores(lprobs, sample)
         return scores, sample, lengths
  
@@ -465,12 +462,8 @@ class OracleForcedDecodingMNT(FairseqCriterion):
     def get_hypothesis_scores(self, lprobs, sample):
         hypotheses = Variable(sample['hypotheses'], requires_grad=False)
         bzw, target_len, vocab_len = lprobs.size()
-        if hypotheses.shape[0] > 1:
-            hypotheses = hypotheses.view(bzw, 5, -1, 1)
-            net_output = lprobs.repeat(1, 5, 1, 1).view(bzw, 5, -1, vocab_len)
-        else: # we only got one beam for some reason
-            hypotheses = hypotheses.view(bzw, 1, -1, 1)
-            net_output = lprobs.repeat(1, 1, 1, 1).view(bzw, 1, -1, vocab_len)
+        hypotheses = hypotheses.view(bzw, 5, -1, 1)
+        net_output = lprobs.repeat(1, 5, 1, 1).view(bzw, 5, -1, vocab_len)
         h_shape = hypotheses.shape[2]
         n_shape = net_output.shape[2]
         if h_shape > n_shape:
