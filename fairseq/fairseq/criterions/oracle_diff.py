@@ -88,7 +88,7 @@ def knn_forced_loss(
                 indicator_row.append(1)
         indicator.append(indicator_row)
     indicator = torch.LongTensor(indicator).cuda()
-    loss = (probs * indicator * ((reward_to_go_student - reward)**2).type_as(probs)).sum()
+    loss = -(probs * indicator * ((reward - reward_to_go_student)**2).type_as(probs)).sum()
     return loss
 
 
