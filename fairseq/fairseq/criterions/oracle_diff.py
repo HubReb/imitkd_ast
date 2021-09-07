@@ -77,7 +77,8 @@ def knn_forced_loss(
     # probs = torch.nn.functional.softmax(avg_scores.exp_())
     probs = scores
     reward_to_go_student = torch.sigmoid(sample_student["reward_to_go"])
-    reward = torch.sigmoid(sample_expert["reward_to_go"] - sample_student["reward_to_go"])
+    reward_to_go_expert = sample_expert["reward_to_go"][:, 0]        # we only care about best hypo's reward to go
+    reward = torch.sigmoid(reward_to_go_expert - sample_student["reward_to_go"])
     indicator = []
     for i, reward_row in enumerate(sample_student["reward_to_go"]):
         indicator_row = []
@@ -418,7 +419,7 @@ class OracleDiff(FairseqCriterion):
         expert_generator = SequenceGenerator(
                 [self.expert],
                 self.expert_vocab_tgt,
-                beam_size=1
+                beam_size=5
         )
         expert_output = expert_generator.generate(
             [self.expert],
