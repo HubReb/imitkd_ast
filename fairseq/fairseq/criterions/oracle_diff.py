@@ -77,7 +77,7 @@ def knn_forced_loss(
     # probs = torch.nn.functional.softmax(avg_scores.exp_())
     probs = scores
     reward_to_go_student = torch.sigmoid(sample_student["reward_to_go"])
-    reward_to_go_expert = sample_expert["reward_to_go"][:, 0]        # we only care about best hypo's reward to go
+    reward_to_go_expert = sample_expert["reward_to_go"][:, 0].view(-1, 1)       # we only care about best hypo's reward to go
     reward = torch.sigmoid(reward_to_go_expert - sample_student["reward_to_go"])
     indicator = []
     for i, reward_row in enumerate(sample_student["reward_to_go"]):
@@ -89,6 +89,7 @@ def knn_forced_loss(
                 indicator_row.append(1)
         indicator.append(indicator_row)
     indicator = torch.LongTensor(indicator).cuda()
+    print(indicator.shape, reward.shape, reward_to_go_student.shape)
     loss = -(probs * indicator * ((reward - reward_to_go_student)**2).type_as(probs)).sum()
     return loss
 
@@ -393,7 +394,10 @@ class OracleDiff(FairseqCriterion):
                 for text in line:
                     source_texts.append(self.expert_vocab_src.encode_line(text, add_if_not_exist=False, append_eos=True))
             else:
-                source_texts.append(self.expert_vocab_src.encode_line(line, add_if_not_exist=False, append_eos=True))
+                if line is None:
+                    source_texts.append(expert_vocab_src.unk())
+                else:
+                    source_texts.append(self.expert_vocab_src.encode_line(line, add_if_not_exist=False, append_eos=True))
         source_text = self.collate_tokens(
             source_texts,
             self.expert_vocab_src.pad(),
