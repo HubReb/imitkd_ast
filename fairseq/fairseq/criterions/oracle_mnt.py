@@ -78,7 +78,7 @@ def knn_forced_loss(
         ):
     avg_scores = scores.sum(2)/lengths
     probs = torch.nn.functional.log_softmax(avg_scores.exp_())
-    loss = (probs * sample['reward'].type_as(probs)).sum()
+    loss = -(probs * sample['reward'].type_as(probs)).sum()
     return loss
 
 

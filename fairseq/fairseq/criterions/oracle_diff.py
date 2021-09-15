@@ -89,7 +89,6 @@ def knn_forced_loss(
                 indicator_row.append(1)
         indicator.append(indicator_row)
     indicator = torch.LongTensor(indicator).cuda()
-    print(indicator.shape, reward.shape, reward_to_go_student.shape)
     loss = -(probs * indicator * ((reward - reward_to_go_student)**2).type_as(probs)).sum()
     return loss
 
@@ -394,10 +393,7 @@ class OracleDiff(FairseqCriterion):
                 for text in line:
                     source_texts.append(self.expert_vocab_src.encode_line(text, add_if_not_exist=False, append_eos=True))
             else:
-                if line is None:
-                    source_texts.append(expert_vocab_src.unk())
-                else:
-                    source_texts.append(self.expert_vocab_src.encode_line(line, add_if_not_exist=False, append_eos=True))
+                source_texts.append(self.expert_vocab_src.encode_line(line, add_if_not_exist=False, append_eos=True))
         source_text = self.collate_tokens(
             source_texts,
             self.expert_vocab_src.pad(),

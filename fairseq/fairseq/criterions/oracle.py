@@ -168,9 +168,9 @@ def knn_forced_loss(
             utils.strip_pad(output, ignore_index),
             bpe_symbol="fastBPE",
         )
-        print("student prediction: ", texts[index])
-        print("expert prediction: ", expert_output_string)
-        print("index: ", indices[index])
+        # print("student prediction: ", texts[index])
+        # print("expert prediction: ", expert_output_string)
+        # print("index: ", indices[index])
         if entire_sentence:
             line = expert_output_string
             new_student_input = model_vocab.encode_line(
