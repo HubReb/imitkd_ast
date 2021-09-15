@@ -82,6 +82,7 @@ def knn_forced_loss(
     for i, reward_row in enumerate(reward_student):
         indicator_row = []
         for j, r in enumerate(reward_row):
+            print(sample_expert["reward"][i][j], r)
             if r > sample_expert["reward"][i][j]:
                 indicator_row.append(0)
             else:
@@ -89,7 +90,7 @@ def knn_forced_loss(
         indicator.append(indicator_row)
     indicator = torch.LongTensor(indicator).cuda()
     loss = -(probs * indicator * ((reward_expert - reward_student)**2).type_as(probs)).sum()
-    return loss
+    return loss, reward_expert.mean(), reward_student.mean()
 
 
 @register_criterion(
@@ -132,12 +133,14 @@ class OracleDiff(FairseqCriterion):
         3) logging outputs to display while training
         """
         net_output = model(**sample["net_input"])
-        loss = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
+        loss, r_expert, r_student = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
         sample_size = (
             sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
         )
         logging_output = {
             "loss" : loss.data,
+            "reward_expert": r_expert.data,
+            "reward_student": r_student.data,
             "ntokens": sample["ntokens"],
             "nsentences": sample["target"].size(0),
             "sample_size": sample_size,
@@ -164,18 +167,19 @@ class OracleDiff(FairseqCriterion):
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
         if valid:
             loss = valid_loss(lprobs, target, self.ignore_prefix_size, self.ignore_prefix_size, reduce=reduce)
+            r_expert, r_student = 0, 0
         else:
             expert_input, texts, cut_texts, indices, student_hypos = self.get_student_predictions_and_pass_to_expert(model, target, sample)
             source_text = self.transform_source_tokens_into_expert_voc(sample)
             expert_output_samples = self.get_expert_output(sample, source_text, expert_input)
             scores, sample_student, sample_expert, lengths = self.get_hypos_and_scores(sample, model, lprobs, expert_output_samples, student_hypos)
-            loss = knn_forced_loss(
+            loss, r_expert, r_student = knn_forced_loss(
                 scores,
                 sample_student,
                 sample_expert,
                 lengths
             )
-        return loss
+        return loss, r_expert, r_student
 
     def compute_accuracy(self, model, net_output, sample):
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
@@ -194,11 +198,18 @@ class OracleDiff(FairseqCriterion):
         loss_sum = sum(log.get("loss", 0) for log in logging_outputs)
         ntokens = sum(log.get("ntokens", 0) for log in logging_outputs)
         sample_size = sum(log.get("sample_size", 0) for log in logging_outputs)
+        reward_expert_sum = sum(log.get("reward_expert", 0) for log in logging_outputs)
+        reward_student_sum = sum(log.get("reward_student", 0) for log in logging_outputs)
 
         metrics.log_scalar(
             "loss", loss_sum / sample_size / math.log(2), sample_size, round=3
         )
-
+        metrics.log_scalar(
+            "mean_reward_expert", reward_expert_sum  / sample_size / math.log(2), sample_size, round=3
+        )
+        metrics.log_scalar(
+            "mean_reward_student", reward_student_sum  / sample_size / math.log(2), sample_size, round=3
+        )
         total = utils.item(sum(log.get("total", 0) for log in logging_outputs))
         if total > 0:
             metrics.log_scalar("total", total)
