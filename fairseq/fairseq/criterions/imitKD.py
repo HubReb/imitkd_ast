@@ -227,10 +227,18 @@ class ImitKD(FairseqCriterion):
             student_generator = SequenceGenerator([student], self.dict, beam_size=5)
             student_generator.cuda()
             hypos = student_generator._generate(sample)
+            targets = sample["target"].data.tolist()
             for i in range(len(hypos)):
                 u = uniform(low=0.0, high=1.0, size=None)
                 if u > self.beta:
-                    sample["target"][i] = hypos[i][0]["tokens"]
+                    targets[i] = hypos[i][0]["tokens"]
+            sample["targets"] = collate_tokens(
+                    targets,
+                    self.dict.pad(),
+                    self.dict.eos(),
+                    left_pad=False,
+                    move_eos_to_beginning=True
+                    )
             student = student.train()
         return sample
 
