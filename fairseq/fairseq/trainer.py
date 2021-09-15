@@ -647,10 +647,11 @@ class Trainer(object):
 
         # task specific setup per epoch
         self.task.begin_epoch(epoch, self.get_model())
-        if self.criterion.beta:
-            self.criterion.beta = 0.1**(epoch/126)
-            print(self.criterion.beta)
-
+        try:
+            if self.criterion.beta:
+                self.criterion.beta = 0.1**(epoch/126)
+        except AttributeError:
+            pass
         if self.tpu:
             import torch_xla.core.xla_model as xm
 
