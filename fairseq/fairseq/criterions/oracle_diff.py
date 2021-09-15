@@ -76,20 +76,19 @@ def knn_forced_loss(
     # avg_scores = scores.sum(2)/lengths
     # probs = torch.nn.functional.softmax(avg_scores.exp_())
     probs = scores
-    reward_to_go_student = torch.sigmoid(sample_student["reward_to_go"])
-    reward_to_go_expert = sample_expert["reward_to_go"][:, 0].view(-1, 1)       # we only care about best hypo's reward to go
-    reward = torch.sigmoid(reward_to_go_expert - sample_student["reward_to_go"])
+    reward_student = sample_student["reward"]
+    reward_expert = sample_expert["reward"][:, 0].view(-1, 1)       # we only care about best hypo's reward
     indicator = []
-    for i, reward_row in enumerate(sample_student["reward_to_go"]):
+    for i, reward_row in enumerate(reward_student):
         indicator_row = []
         for j, r in enumerate(reward_row):
-            if r > sample_expert["reward_to_go"][i][j]:
+            if r > sample_expert["reward"][i][j]:
                 indicator_row.append(0)
             else:
                 indicator_row.append(1)
         indicator.append(indicator_row)
     indicator = torch.LongTensor(indicator).cuda()
-    loss = -(probs * indicator * ((reward - reward_to_go_student)**2).type_as(probs)).sum()
+    loss = -(probs * indicator * ((reward_expert - reward_student)**2).type_as(probs)).sum()
     return loss
 
 
@@ -338,7 +337,7 @@ class OracleDiff(FairseqCriterion):
             scale_scores([h['bleu'] for h in hypos_i])
             for hypos_i in hypos
         ])
-        sample['reward_to_go'] = Variable(reward, requires_grad=False)
+        sample['reward'] = Variable(reward, requires_grad=False)
         return sample, hypos
 
     def get_student_predictions_and_pass_to_expert(self, model, target, sample):
