@@ -232,6 +232,8 @@ class ImitKD(FairseqCriterion):
                 u = uniform(low=0.0, high=1.0, size=None)
                 if u > self.beta:
                     targets[i] = hypos[i][0]["tokens"]
+                else:
+                    targets[i] = torch.tensor(targets[i])
             sample["targets"] = collate_tokens(
                     targets,
                     self.dict.pad(),
