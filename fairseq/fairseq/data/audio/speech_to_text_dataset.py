@@ -324,21 +324,33 @@ class SpeechToTextDataset(FairseqDataset):
                 left_pad=False,
                 move_eos_to_beginning=False,
             )
-            target = target.index_select(0, order)
-            target_lengths = torch.tensor(
-                [t.size(0) for _, _, t, _ in samples], dtype=torch.long
-            ).index_select(0, order)
-            prev_output_tokens = fairseq_data_utils.collate_tokens(
-                [t for _, _, t, _ in samples],
-                self.tgt_dict.pad(),
-                self.tgt_dict.eos(),
-                left_pad=False,
-                move_eos_to_beginning=True,
-            )
-            prev_output_tokens = prev_output_tokens.index_select(0, order)
-            ntokens = sum(t.size(0) for _, _, t, _ in samples)
-            source_tokens = [sample[3] for sample in samples]
-
+            if self.src_texts is None:
+                target = target.index_select(0, order)
+                target_lengths = torch.tensor(
+                    [t.size(0) for _, _, t, _ in samples], dtype=torch.long
+                ).index_select(0, order)
+                prev_output_tokens = fairseq_data_utils.collate_tokens(
+                    [t for _, _, t, _ in samples],
+                    self.tgt_dict.pad(),
+                    self.tgt_dict.eos(),
+                    left_pad=False,
+                    move_eos_to_beginning=True,
+                )
+                prev_output_tokens = prev_output_tokens.index_select(0, order)
+                ntokens = sum(t.size(0) for _, _, t, _ in samples)
+            else:
+                source_tokens = [sample[3] for sample in samples]
+                target_lengths = torch.tensor(
+                    [t.size(0) for _, _, t, _ in samples], dtype=torch.long
+                )
+                prev_output_tokens = fairseq_data_utils.collate_tokens(
+                    [t for _, _, t, _ in samples],
+                    self.tgt_dict.pad(),
+                    self.tgt_dict.eos(),
+                    left_pad=False,
+                    move_eos_to_beginning=True,
+                )
+                ntokens = sum(t.size(0) for _, _, t, _ in samples)
         out = {
             "id": indices,
             "net_input": {
