@@ -648,7 +648,7 @@ class Trainer(object):
         # task specific setup per epoch
         self.task.begin_epoch(epoch, self.get_model())
         if self.criterion.beta:
-            self.criterion.beta = 0.1**(epoch/500)
+            self.criterion.beta = 0.1**(epoch/126)
             print(self.criterion.beta)
 
         if self.tpu:
