@@ -109,7 +109,7 @@ def imit_kd_loss(
         expert_preds_in_model_vocab = [
                 model_dict.encode_line(
                     expert_vocab_tgt.string(
-                        t, bpe_symbol='sentencepiece', escape_unk=True
+                        t, bpe_symbol='fastBPE', escape_unk=True
                         ), add_if_not_exist=False
                 ) for t in expert_preds
         ]
@@ -122,6 +122,8 @@ def imit_kd_loss(
         )
         preds = preds.to(torch.int64).cuda()
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
+    if preds.dim() == lprobs.dim() -1:
+        preds = preds.unsqueeze(-1)
     imit_kd_loss = -lprobs.gather(dim=-1, index=preds)
     if ignore_index is not None:
         pad_mask = preds.eq(ignore_index)
