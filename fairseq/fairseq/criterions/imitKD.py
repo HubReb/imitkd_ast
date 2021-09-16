@@ -120,11 +120,8 @@ def imit_kd_loss(
                 left_pad=False,
                 move_eos_to_beginning=False
         )
-        preds = preds.to(torch.int64).view(-1).cuda()
+        preds = preds.to(torch.int64).cuda()
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
-    lprobs = lprobs.view(-1, lprobs.size(-1))
-    if preds.dim() == lprobs.dim() - 1:
-        preds = preds.unsqueeze(-1)
     imit_kd_loss = -lprobs.gather(dim=-1, index=preds)
     if ignore_index is not None:
         pad_mask = preds.eq(ignore_index)
