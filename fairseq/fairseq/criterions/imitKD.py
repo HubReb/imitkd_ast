@@ -121,6 +121,12 @@ def imit_kd_loss(
                 move_eos_to_beginning=False
         )
         preds = preds.to(torch.int64).cuda()
+    for i, t in enumerate(expert_preds):
+        print(expert_vocab_tgt.string(
+            t, bpe_symbol='fastBPE', escape_unk=True
+            ), add_if_not_exist=False)
+        print(model_dict.string(generated_dataset["target"][i], bpe_symbol='sentencepiece', escape_unk=True
+                            ), add_if_not_exist=False)
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
     if preds.dim() == lprobs.dim() -1:
         preds = preds.unsqueeze(-1)
