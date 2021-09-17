@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from random import randint
 
 from sacremoses import MosesDetokenizer
+import sentencepiece as spm
 
 import torch
 from torch.autograd import Variable
@@ -54,7 +55,10 @@ class ImitKDConfig(FairseqDataclass):
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/wmt19.en-de.joined-dict.ensemble/",
         metadata={"help": "directory with expert's dictionaries"},
     )
-
+    sp_model: str = field(
+        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/covost/en/spm_bpe8000_st_en_de.model",
+        metadata={"help": "student's sentencepiece model"},
+    )
 
 def valid_loss(lprobs, target, ignore_prefix_size, ignore_index=None, reduce=True):
     if target.dim() == lprobs.dim() - 1:
@@ -77,6 +81,7 @@ def imit_kd_loss(
     source_text,
     model_dict,
     expert_vocab_tgt,
+    sp_model,
     ignore_index
         ):
     sample_expert = {
@@ -103,15 +108,20 @@ def imit_kd_loss(
             "ntokens": generated_dataset["ntokens"],
             "nsentences": generated_dataset["nsentences"],
             }
+
     with torch.no_grad():
         expert_out = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=True)
         expert_preds = expert_out.argmax(-1)
         expert_preds_in_model_vocab = [
                 model_dict.encode_line(
-                    expert_vocab_tgt.string(
-                        utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True
-                        ), add_if_not_exist=False
-                ) for t in expert_preds
+                    " ".join(sp_model.EncodeAsPieces(
+                            expert_vocab_tgt.string(
+                                utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True
+                            )
+                        )
+                    ),
+                    add_if_not_exist=False)
+                for t in expert_preds
         ]
         preds = collate_tokens(
                 expert_preds_in_model_vocab,
@@ -121,20 +131,11 @@ def imit_kd_loss(
                 move_eos_to_beginning=False
         )
         preds = preds.to(torch.int64).cuda()
-    for i, t in enumerate(expert_preds):
-        print("expert output: ", expert_vocab_tgt.string(
-            t, bpe_symbol='fastBPE', escape_unk=True
-            ))
-        print("expert output in student vocab: ", model_dict.string(model_dict.encode_line(expert_vocab_tgt.string(
-            t, bpe_symbol='fastBPE', escape_unk=True
-            )), add_if_not_exist=False)
-        )
- 
-        print("target: ", model_dict.string(utils.strip_pad(generated_dataset["target"][i], model_dict.pad()), bpe_symbol='sentencepiece', escape_unk=True
- 
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
     if preds.dim() == lprobs.dim() -1:
         preds = preds.unsqueeze(-1)
+    if preds.shape[1] > lprobs.shape[1]:
+        preds = preds[:, :lprobs.shape[1], :]
     imit_kd_loss = -lprobs.gather(dim=-1, index=preds)
     if ignore_index is not None:
         pad_mask = preds.eq(ignore_index)
@@ -155,6 +156,7 @@ class ImitKD(FairseqCriterion):
         expert_vocab_tgt,
         path,
         beta,
+        sp_model,
         ignore_prefix_size=0,
         report_accuracy=False,
     ):
@@ -171,7 +173,9 @@ class ImitKD(FairseqCriterion):
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
         self.beta = beta
-
+        self.sp_model = spm.SentencePieceProcessor()
+        self.sp_model.Load(sp_model)
+        self.sp_model.requires_grad = False
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
@@ -224,7 +228,8 @@ class ImitKD(FairseqCriterion):
                 source_text,
                 self.dict,
                 self.expert_vocab_tgt,
-                self.padding_idx
+                self.sp_model,
+                self.padding_idx,
             )
         return loss
 
