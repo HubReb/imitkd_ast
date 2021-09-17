@@ -9,6 +9,7 @@ from random import randint
 
 from sacremoses import MosesDetokenizer
 import sentencepiece as spm
+import fastBPE
 
 import torch
 from torch.autograd import Variable
@@ -60,6 +61,12 @@ class ImitKDConfig(FairseqDataclass):
         metadata={"help": "student's sentencepiece model"},
     )
 
+    bpe_codes: str = field(
+        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
+        metadata={"help": "expert's bpe codes"},
+    )
+
+
 def valid_loss(lprobs, target, ignore_prefix_size, ignore_index=None, reduce=True):
     if target.dim() == lprobs.dim() - 1:
         target = target.unsqueeze(-1)
@@ -82,8 +89,14 @@ def imit_kd_loss(
     model_dict,
     expert_vocab_tgt,
     sp_model,
+    bpe,
     ignore_index
         ):
+    print(generated_dataset["net_input"]["prev_output_tokens"])
+    encoded_prevs = []
+    for s in generated_dataset["net_input"]["prev_output_tokens"]:
+        encoded_prevs.append(model_dict.string(s, bpe_symbol='sentencepiece', escape_unk=True))
+    encoded_prevs = bpe.apply(encoded_prevs)
     sample_expert = {
             "id": generated_dataset["id"],
             "net_input": {
@@ -92,10 +105,8 @@ def imit_kd_loss(
                 "prev_output_tokens": collate_tokens(
                     [
                         expert_vocab_tgt.encode_line(
-                            # model_dict.string(
-                                # t, bpe_symbol='sentencepiece', escape_unk=True
-                            # ), add_if_not_exist=False
-                        t) for t in generated_dataset["pr_target"]
+                            t, add_if_not_exist=False, append_eos=True
+                        ) for t in encoded_prevs
                     ],
                     expert_vocab_tgt.pad(),
                     expert_vocab_tgt.eos(),
@@ -157,6 +168,7 @@ class ImitKD(FairseqCriterion):
         path,
         beta,
         sp_model,
+        bpe_codes,
         ignore_prefix_size=0,
         report_accuracy=False,
     ):
@@ -170,6 +182,7 @@ class ImitKD(FairseqCriterion):
         self.expert.requires_grad = False
         self.dict = task.tgt_dict
         self.eos = self.dict.eos()
+        self.bpe = fastBPE.fastBPE(bpe_codes, expert_vocab_tgt)
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
         self.beta = beta
@@ -229,6 +242,7 @@ class ImitKD(FairseqCriterion):
                 self.dict,
                 self.expert_vocab_tgt,
                 self.sp_model,
+                self.bpe,
                 self.padding_idx,
             )
         return loss
@@ -242,20 +256,20 @@ class ImitKD(FairseqCriterion):
             student_generator = SequenceGenerator([student], self.dict, beam_size=5)
             student_generator.cuda()
             hypos = student_generator._generate(sample)
-            targets = sample["target"].data.tolist()
+            targets = sample["net_input"]["prev_output_tokens"].data.tolist()
             for i in range(len(hypos)):
                 u = uniform(low=0.0, high=1.0, size=None)
                 if u > self.beta:
                     targets[i] = hypos[i][0]["tokens"]
                 else:
                     targets[i] = torch.tensor(targets[i])
-            sample["targets"] = collate_tokens(
+            sample["net_input"]["prev_output_tokens"] = collate_tokens(
                     targets,
                     self.dict.pad(),
                     self.dict.eos(),
                     left_pad=False,
                     move_eos_to_beginning=False
-                    )
+                    ).cuda()
             student = student.train()
         return sample
 
