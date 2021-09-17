@@ -87,10 +87,10 @@ def imit_kd_loss(
                 "prev_output_tokens": collate_tokens(
                     [
                         expert_vocab_tgt.encode_line(
-                            model_dict.string(
-                                t, bpe_symbol='sentencepiece', escape_unk=True
-                            ), add_if_not_exist=False
-                        ) for t in generated_dataset["target"]
+                            # model_dict.string(
+                                # t, bpe_symbol='sentencepiece', escape_unk=True
+                            # ), add_if_not_exist=False
+                        t) for t in generated_dataset["pr_target"]
                     ],
                     expert_vocab_tgt.pad(),
                     expert_vocab_tgt.eos(),
@@ -121,6 +121,17 @@ def imit_kd_loss(
                 move_eos_to_beginning=False
         )
         preds = preds.to(torch.int64).cuda()
+    for i, t in enumerate(expert_preds):
+        print("expert output: ", expert_vocab_tgt.string(
+            t, bpe_symbol='fastBPE', escape_unk=True
+            ))
+        print("expert output in student vocab: ", model_dict.string(model_dict.encode_line(expert_vocab_tgt.string(
+            t, bpe_symbol='fastBPE', escape_unk=True
+            )), add_if_not_exist=False)
+        )
+ 
+        print("target: ", model_dict.string(utils.strip_pad(generated_dataset["target"][i], model_dict.pad()), bpe_symbol='sentencepiece', escape_unk=True
+ 
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
     if preds.dim() == lprobs.dim() -1:
         preds = preds.unsqueeze(-1)
