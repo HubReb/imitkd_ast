@@ -6,8 +6,10 @@
 import math
 from dataclasses import dataclass, field
 from random import randint
+import fastBPE
 
 from sacremoses import MosesDetokenizer
+import sentencepiece as spm
 
 import torch
 from fairseq import metrics, utils
@@ -53,8 +55,14 @@ class OracleForcedDecodingConfig(FairseqDataclass):
         default=False,
         metadata={"help": "whether to split the model prediction before the first unknown"},
     )
- 
-
+    sp_model: str = field(
+        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/covost/en/spm_bpe8000_st_en_de.model",
+        metadata={"help": "student's sentencepiece model"},
+    )
+    bpe_codes: str = field(
+        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
+        metadata={"help": "expert's bpe codes"},
+    )
 
 def knn_forced_loss(
         expert,
@@ -67,6 +75,8 @@ def knn_forced_loss(
         expert_vocab_tgt,
         entire_sentence,
         ignore_prefix_size,
+        sp_model,
+        bpe,
         ignore_index=None,
         reduce=True,
         valid=False,
@@ -102,12 +112,12 @@ def knn_forced_loss(
             index = 1
         else:
             index = randint(1, len(prediction_string.split())-1)
-        indices.append(index)
         texts.append(prediction_string)
         prediction_string = " ".join(prediction_string.split()[:index])
         prediction_string_in_expert_vocab = expert_vocab_tgt.encode_line(
-                prediction_string, add_if_not_exist=False, append_eos=False
-                )
+            bpe.apply([prediction_string])[0], add_if_not_exist=False, append_eos=False
+        )
+        indices.append(len(prediction_string_in_expert_vocab))
         if expert_vocab_tgt.unk() in prediction_string_in_expert_vocab and avoid_unk:
             indices.pop()
             new_index = prediction_string_in_expert_vocab.tolist().index(expert_vocab_tgt.unk())
@@ -162,6 +172,7 @@ def knn_forced_loss(
     expert_output = torch.nn.utils.rnn.pad_sequence(expert_output_samples, padding_value=ignore_index, batch_first=True)
     # print(sample["net_input"]["prev_output_tokens"])
     # print(expert_output.shape)
+    new_inputs = []
     for index, output in enumerate(expert_output):
         # print(index)
         expert_output_string = expert_vocab_tgt.string(
@@ -172,33 +183,29 @@ def knn_forced_loss(
         # print("expert prediction: ", expert_output_string)
         # print("index: ", indices[index])
         if entire_sentence:
-            line = expert_output_string
             new_student_input = model_vocab.encode_line(
-                line,
+                " ".join(sp_model.EncodeAsPieces(line)),
                 add_if_not_exist=False,
                 append_eos=True
-            )
+                )[:len(sample["net_input"]["prev_output_tokens"][index])].tolist()
+            while len(new_student_input) < len(sample["net_input"]["prev_output_tokens"][index]):
+                new_student_input.append(model_vocab.pad())
+            new_student_input = torch.tensor(new_student_input)
         else:
-            if not len(text_predictions[index].split()) == len(expert_output_string.split()):
-                line = text_predictions[index] + " " + expert_output_string.split()[indices[index]]
-                new_student_input = model_vocab.encode_line(
-                    line,
-                    add_if_not_exist=False,
-                    append_eos=False
-                )
-            else:
-                # expert failed to complete student's input - nothing to take from this
-                continue
+            line = " ".join(expert_output_string.split()[:indices[index]+1])
+            new_student_input = model_vocab.encode_line(
+                " ".join(sp_model.EncodeAsPieces(line)),
+                add_if_not_exist=False,
+                append_eos=False
+            ).tolist()
+            new_student_input = torch.tensor(new_student_input + sample["net_input"]["prev_output_tokens"][index][len(new_student_input):].tolist())
         # print(line)
 
-        if entire_sentence:
-            new_student_input = new_student_input.tolist()
-            while len(new_student_input) < len(sample["net_input"]["prev_output_tokens"][index]):
-                new_student_input.append(ignore_index)
-            new_student_input = torch.LongTensor(new_student_input)
-            sample["net_input"]["prev_output_tokens"][index, 1:] = new_student_input[:len(sample["net_input"]["prev_output_tokens"][index])-1].cuda()
-        else:
-            sample["net_input"]["prev_output_tokens"][index, 1:indices[index]+2] = new_student_input.cuda()
+        new_inputs.append(new_student_input)
+    new_inputs = collate_tokens(
+        new_inputs, model_vocab.pad(), model_vocab.eos(), left_pad=False, move_eos_to_beginning=False
+    )
+    sample["net_input"]["prev_output_tokens"] = new_inputs.cuda()
     net_output = student(
         **sample["net_input"]
     )
@@ -242,6 +249,8 @@ class OracleForcedDecoding(FairseqCriterion):
         path,
         entire_sentence,
         avoid_unk,
+        sp_model,
+        bpe_codes,
         ignore_prefix_size=0,
         report_accuracy=False,
     ):
@@ -261,6 +270,11 @@ class OracleForcedDecoding(FairseqCriterion):
         self.sentence_avg = False
         self.entire_sentence = entire_sentence
         self.avoid_unk = avoid_unk
+        self.sp_model = spm.SentencePieceProcessor()
+        self.sp_model.Load(sp_model)
+        self.sp_model.requires_grad = False
+        self.bpe = fastBPE.fastBPE(bpe_codes, expert_vocab_tgt)
+
 
 
     def forward(self, model, sample, reduce=True, valid=False):
@@ -314,6 +328,8 @@ class OracleForcedDecoding(FairseqCriterion):
             self.expert_vocab_tgt,
             self.entire_sentence,
             self.ignore_prefix_size,
+            self.sp_model,
+            self.bpe,
             ignore_index=self.padding_idx,
             reduce=reduce,
             valid=valid,
@@ -374,5 +390,25 @@ class OracleForcedDecoding(FairseqCriterion):
         to True will improves distributed training speed.
         """
         return True
+
+def collate_tokens(values, pad_idx, eos, left_pad, move_eos_to_beginning):
+    size = max(v.size(0) for v in values)
+    res = values[0].new(len(values), size).fill_(pad_idx)
+
+    def copy_tensor(src, dst):
+        assert dst.numel() == src.numel()
+        if move_eos_to_beginning:
+            assert src[-1] == eos
+            dst[0] = eos
+            dst[1:] = src[:-1]
+        else:
+            dst.copy_(src)
+
+    for i, v in enumerate(values):
+        if left_pad:
+            copy_tensor(v, res[i][size-len(v):])
+        else:
+            copy_tensor(v, res[i][:len(v)])
+    return res
 
 
