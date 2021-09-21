@@ -6,8 +6,9 @@
 import regex as re
 
 
-def change_format_news(data):
-    source, translation = [], []
+def change_format_news(data: list[str]) -> tuple[list[str], list[str]]:
+    source: list[str] = []
+    translation: list[str] = []
     if not isinstance(data, list):
         raise TypeError
     if [] == data:
@@ -39,7 +40,8 @@ def change_format_news(data):
         translated_sentence = translated_sentence.strip()
         source.append(source_sentence)
         translation.append(translated_sentence)
-    non_doubled_source_sentences, non_doubled_translation_sentences = [], []
+    non_doubled_source_sentences: list[str] = []
+    non_doubled_translation_sentences: list[str] = []
     for source_sentence, translated_sentence in zip(source, translation):
         if source_sentence not in non_doubled_source_sentences:
             non_doubled_source_sentences.append(source_sentence)
@@ -47,7 +49,7 @@ def change_format_news(data):
     return non_doubled_source_sentences, non_doubled_translation_sentences
 
 
-def split_news_into_seperate_file_per_language(folder, filename):
+def split_news_into_seperate_file_per_language(folder: str, filename: str):
     with open(f"{folder}/{filename}") as f:
         file_content = f.read().split("\n")[:-1]
     source_language, target_language = change_format_news(file_content)
