@@ -229,7 +229,7 @@ class ImitKD(FairseqCriterion):
     def compute_loss(self, model, net_output, sample, reduce=True, valid=False):
         if valid:
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
-            loss = valid_loss(lprobs, target, self.ignore_prefix_size, self.ignore_prefix_size, reduce=reduce)
+            loss = valid_loss(lprobs, target, self.ignore_prefix_size, self.padding_idx, reduce=reduce)
         else:
             source_text = self.transform_source_tokens_into_expert_voc(sample)
             generated_dataset = self.generate_imit_batch(model, sample)
