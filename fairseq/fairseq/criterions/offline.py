@@ -229,7 +229,7 @@ class Difference(FairseqCriterion):
             for i in range(len(hypos)):
                 t = int(uniform(low=1, high=len(hypos[i][0]["tokens"]), size=None))
                 u = uniform(low=0.0, high=1.0, size=None)
-                if u < self.beta:
+                if u > self.beta:
                     c = choice(list(self.dict.indices.values()))
                     hypo = torch.cat((hypos[i][0]["tokens"][:t], torch.LongTensor([c]).cuda()))
                 else:
