@@ -32,7 +32,7 @@ def test_change_format_correct_input_empty():
 def test_change_format_multiple_tabs():
     test_list = ["source sentence\t\t\tnewword\t target sentence"]
     with pytest.raises(ValueError):
-        source, target = change_format(test_list)
+        change_format(test_list)
 
 
 def test_change_format_multiple_tabs_starts_hack():
