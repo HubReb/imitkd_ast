@@ -185,7 +185,7 @@ class Difference(FairseqCriterion):
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.ignore_prefix_size, self.padding_idx, reduce=reduce)
             # we need to reload this after every epoch - thankfully checkpoint_last.pt is updated after a epoch and we validate only at the end of the epoch so this hack works
-            self.frozen_student, _ = load_model_ensemble([self.frozen_student], arg_overrides={"data": self.frozen_student_path, "load_pretrained_encoder_from": self.frozen_student_path})
+            self.frozen_student, _ = load_model_ensemble([self.frozen_student], arg_overrides={"data": self.frozen_student_path, "load_pretrained_encoder_from": self.frozen_student_encoder_path})
             self.frozen_student = self.frozen_student[-1]
             self.frozen_student.requires_grad = False
             print("Updated frozen student model to new checkpoint!")
