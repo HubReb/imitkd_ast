@@ -229,8 +229,9 @@ class Difference(FairseqCriterion):
             for i in range(len(hypos)):
                 t = int(uniform(low=1, high=len(hypos[i][0]["tokens"]), size=None))
                 u = uniform(low=0.0, high=1.0, size=None)
-                if u > self.beta:
-                    hypo = torch.tensor(hypos[i][0]["tokens"][:t] + choice(list(self.dict.indices.values())))
+                if u < self.beta:
+                    c = choice(list(self.dict.indices.values()))
+                    hypo = torch.cat((hypos[i][0]["tokens"][:t], torch.LongTensor([c]).cuda()))
                 else:
                     hypo = hypos[i][0]["tokens"][:t+1].clone().detach()
                 partial_hypos.append(hypo)
