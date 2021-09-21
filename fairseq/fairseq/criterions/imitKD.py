@@ -92,7 +92,6 @@ def imit_kd_loss(
     bpe,
     ignore_index
         ):
-    print(generated_dataset["net_input"]["prev_output_tokens"])
     encoded_prevs = []
     for s in generated_dataset["net_input"]["prev_output_tokens"]:
         encoded_prevs.append(model_dict.string(s, bpe_symbol='sentencepiece', escape_unk=True))
@@ -121,7 +120,7 @@ def imit_kd_loss(
             }
 
     with torch.no_grad():
-        expert_out = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=True)
+        expert_out = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=True).detach()
         expert_preds = expert_out.argmax(-1)
         expert_preds_in_model_vocab = [
                 model_dict.encode_line(
@@ -257,19 +256,20 @@ class ImitKD(FairseqCriterion):
             student_generator.cuda()
             hypos = student_generator._generate(sample)
             targets = sample["net_input"]["prev_output_tokens"].data.tolist()
+            max_length = max([len(i) for i in targets])     # let's avoid blowing up the GPU RAM, shall we?
             for i in range(len(hypos)):
                 u = uniform(low=0.0, high=1.0, size=None)
                 if u > self.beta:
-                    targets[i] = hypos[i][0]["tokens"]
+                    targets[i] = hypos[i][0]["tokens"][:max_length].clone().detach()
                 else:
-                    targets[i] = torch.tensor(targets[i])
+                    targets[i] = torch.tensor(targets[i]).clone().detach()
             sample["net_input"]["prev_output_tokens"] = collate_tokens(
                     targets,
                     self.dict.pad(),
                     self.dict.eos(),
                     left_pad=False,
                     move_eos_to_beginning=False
-                    ).cuda()
+                    ).detach().cuda()
             student = student.train()
         return sample
 

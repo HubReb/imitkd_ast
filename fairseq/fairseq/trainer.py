@@ -649,7 +649,7 @@ class Trainer(object):
         self.task.begin_epoch(epoch, self.get_model())
         try:
             if self.criterion.beta:
-                self.criterion.beta = 0.1**(epoch/126)
+                self.criterion.beta = 0.1**(epoch/100)
         except AttributeError:
             pass
         if self.tpu:
