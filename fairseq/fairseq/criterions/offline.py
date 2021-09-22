@@ -361,11 +361,16 @@ class Difference(FairseqCriterion):
         metrics.log_scalar(
             "reward_student_over_all_samples", student_reward_sum / sample_size, sample_size, round=3
         )
+        if number_of_non_zero_rewards > 0:
+            expert_mean = expert_reward_sum / number_of_non_zero_rewards
+            student_mean = student_reward_sum / number_of_non_zero_rewards
+        else:
+            expert_mean, student_mean = 0, 0
         metrics.log_scalar(
-            "reward_expert_over_kept_samples", expert_reward_sum / number_of_non_zero_rewards, number_of_non_zero_rewards, round=3
+            "reward_expert_over_kept_samples", expert_mean, number_of_non_zero_rewards, round=3
         )
         metrics.log_scalar(
-            "reward_student_over_kept_samples", student_reward_sum / number_of_non_zero_rewards, number_of_non_zero_rewards, round=3
+            "reward_student_over_kept_samples", student_mean, number_of_non_zero_rewards, round=3
         )
         total = utils.item(sum(log.get("total", 0) for log in logging_outputs))
         if total > 0:
