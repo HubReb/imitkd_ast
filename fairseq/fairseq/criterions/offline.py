@@ -9,6 +9,7 @@ import sentencepiece as spm
 import fastBPE
 
 import torch
+from torch.distributions.categorical import Categorical
 import numpy as np
 from torch.autograd import Variable
 from numpy.random import uniform
@@ -231,7 +232,15 @@ class Difference(FairseqCriterion):
                 t = int(uniform(low=1, high=len(hypos[i][0]["tokens"]), size=None))
                 u = uniform(low=0.0, high=1.0, size=None)
                 if u > self.beta:
-                    c = choice(list(self.dict.indices.values()))
+                    sample_frozen = sample.copy()
+                    sample_frozen = {
+                        "net_input": {
+                            "src_tokens": sample["net_input"]["src_tokens"][i].unsqueeze(0).cuda(),
+                            "src_lengths":sample["net_input"]["src_lengths"][i].unsqueeze(0),
+                            "prev_output_tokens": hypos[i][0]["tokens"][:t].unsqueeze(0),
+                        },
+                    }
+                    c = torch.argmax(self.frozen_student.get_normalized_probs(self.frozen_student(**sample_frozen["net_input"]), log_probs=True)[:, t-1, :])
                     hypo = torch.cat((hypos[i][0]["tokens"][:t], torch.LongTensor([c]).cuda()))
                 else:
                     hypo = hypos[i][0]["tokens"][:t+1].clone().detach()
@@ -322,7 +331,7 @@ class Difference(FairseqCriterion):
             bleu_expert_hypo = expert_scorer.score(ref, h)
             reward_expert.append(bleu_expert_hypo)
             reward_student.append(bleu_student_hypo)
-            if bleu_student_hypo >= bleu_expert_hypo:
+            if bleu_student_hypo > bleu_expert_hypo:
                 reward_difference.append(0)
             else:
                 reward_difference.append(((torch.sigmoid(torch.tensor(bleu_student_partial_hypo)) - torch.sigmoid(torch.tensor(bleu_expert_hypo - bleu_student_hypo)))**2).tolist())
