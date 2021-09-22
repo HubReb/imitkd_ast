@@ -138,16 +138,16 @@ class Difference(FairseqCriterion):
         self.eos = self.dict.eos()
         self.bpe = fastBPE.fastBPE(bpe_codes, expert_vocab_tgt)
         self.pad_idx = self.padding_idx
-        self.sentence_avg = False
+        self.sentence_avg = True
         self.beta = beta
-        self.frozen_student, _ = load_model_ensemble([self.frozen_student], arg_overrides={"data": self.frozen_student_path})#, "load_pretrained_encoder_from": self.frozen_student_encoder_path})
+        self.frozen_student, _ = load_model_ensemble([self.frozen_student], arg_overrides={"data": self.frozen_student_path, "load_pretrained_encoder_from": self.frozen_student_encoder_path})
         self.frozen_student = self.frozen_student[-1]
         self.frozen_student.requires_grad = False
 
 
     def forward(self, model, sample, reduce=True, valid=False):
         source_text = self.transform_source_tokens_into_expert_voc(sample)
-        sample, sum_expert_reward, sum_student_reward = self.generate_dataset(sample, source_text)
+        sample, sum_expert_reward, sum_student_reward, number_of_non_zero_rewards = self.generate_dataset(sample, source_text)
         net_output = model(**sample["net_input"])
         loss = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
         sample_size = (
@@ -159,7 +159,8 @@ class Difference(FairseqCriterion):
             "nsentences": sample["target"].size(0),
             "sample_size": sample_size,
             "sum_expert_reward": sum_expert_reward.copy(),
-            "sum_student_reward": sum_student_reward.copy()
+            "sum_student_reward": sum_student_reward.copy(),
+            "non_zero_rewards": number_of_non_zero_rewards
         }
         if self.report_accuracy:
             n_correct, total = self.compute_accuracy(model, net_output, sample)
@@ -185,7 +186,7 @@ class Difference(FairseqCriterion):
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.ignore_prefix_size, self.padding_idx, reduce=reduce)
             # we need to reload this after every epoch - thankfully checkpoint_last.pt is updated after a epoch and we validate only at the end of the epoch so this hack works
-            self.frozen_student, _ = load_model_ensemble([self.frozen_student], arg_overrides={"data": self.frozen_student_path})#, "load_pretrained_encoder_from": self.frozen_student_encoder_path})
+            self.frozen_student, _ = load_model_ensemble([self.frozen_student], arg_overrides={"data": self.frozen_student_path, "load_pretrained_encoder_from": self.frozen_student_encoder_path})
             self.frozen_student = self.frozen_student[-1]
             self.frozen_student.requires_grad = False
             print("Updated frozen student model to new checkpoint!")
@@ -300,6 +301,7 @@ class Difference(FairseqCriterion):
         expert_scorer = BleuScorer(self.expert_vocab_tgt.pad(), self.expert_vocab_tgt.eos(), self.expert_vocab_tgt.unk())
         reward_expert = []
         reward_student = []
+        non_zero_rewards = 0
         for i, hypos_i in enumerate(hypos):     # iterate over dataset
             ref = utils.strip_pad(target[i, :], self.dict.pad()).cpu()
             ref_string = self.dict.string(ref, bpe_symbol='sentencepiece', escape_unk=True)
@@ -324,9 +326,10 @@ class Difference(FairseqCriterion):
                 reward_difference.append(0)
             else:
                 reward_difference.append(((torch.sigmoid(torch.tensor(bleu_student_partial_hypo)) - torch.sigmoid(torch.tensor(bleu_expert_hypo - bleu_student_hypo)))**2).tolist())
+                non_zero_rewards += 1
         sample["reward_difference"] = torch.LongTensor(reward_difference).cuda()
         sample["partial_hypos"] = partial_hypos.clone().detach()
-        return sample, np.sum(reward_expert), np.sum(reward_student)
+        return sample, np.sum(reward_expert), np.sum(reward_student), non_zero_rewards
 
 
     def compute_accuracy(self, model, net_output, sample):
@@ -346,21 +349,24 @@ class Difference(FairseqCriterion):
         loss_sum = sum(log.get("loss", 0) for log in logging_outputs)
         expert_reward_sum = sum(log.get("sum_expert_reward", 0) for log in logging_outputs)
         student_reward_sum = sum(log.get("sum_student_reward", 0) for log in logging_outputs)
-        print([log.get("sum_expert_reward", 0) for log in logging_outputs])
-        print([log.get("ntokens", 0) for log in logging_outputs])
+        number_of_non_zero_rewards = sum(log.get("non_zero_rewards", 0) for log in logging_outputs)
         ntokens = sum(log.get("ntokens", 0) for log in logging_outputs)
         sample_size = sum(log.get("sample_size", 0) for log in logging_outputs)
-        print(expert_reward_sum, student_reward_sum, sample_size)
         metrics.log_scalar(
             "loss", loss_sum / sample_size / math.log(2), sample_size, round=3
         )
         metrics.log_scalar(
-            "reward_expert", expert_reward_sum / sample_size, sample_size, round=3
+            "reward_expert_over_all_samples", expert_reward_sum / sample_size, sample_size, round=3
         )
         metrics.log_scalar(
-            "reward_student", student_reward_sum / sample_size, sample_size, round=3
+            "reward_student_over_all_samples", student_reward_sum / sample_size, sample_size, round=3
         )
-
+        metrics.log_scalar(
+            "reward_expert_over_kept_samples", expert_reward_sum / number_of_non_zero_rewards, number_of_non_zero_rewards, round=3
+        )
+        metrics.log_scalar(
+            "reward_student_over_kept_samples", student_reward_sum / number_of_non_zero_rewards, number_of_non_zero_rewards, round=3
+        )
         total = utils.item(sum(log.get("total", 0) for log in logging_outputs))
         if total > 0:
             metrics.log_scalar("total", total)
