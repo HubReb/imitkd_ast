@@ -336,7 +336,7 @@ class Difference(FairseqCriterion):
             else:
                 reward_difference.append(((torch.sigmoid(torch.tensor(bleu_student_partial_hypo)) - torch.sigmoid(torch.tensor(bleu_expert_hypo - bleu_student_hypo)))**2).tolist())
                 non_zero_rewards += 1
-        sample["reward_difference"] = torch.LongTensor(reward_difference).cuda()
+        sample["reward_difference"] = torch.FloatTensor(reward_difference).cuda()
         sample["partial_hypos"] = partial_hypos.clone().detach()
         return sample, np.sum(reward_expert), np.sum(reward_student), non_zero_rewards
 
