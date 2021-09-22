@@ -140,7 +140,7 @@ class Difference(FairseqCriterion):
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
         self.beta = beta
-        self.frozen_student, _ = load_model_ensemble([self.frozen_student], arg_overrides={"data": self.frozen_student_path, "load_pretrained_encoder_from": self.frozen_student_encoder_path})
+        self.frozen_student, _ = load_model_ensemble([self.frozen_student], arg_overrides={"data": self.frozen_student_path})#, "load_pretrained_encoder_from": self.frozen_student_encoder_path})
         self.frozen_student = self.frozen_student[-1]
         self.frozen_student.requires_grad = False
 
@@ -158,8 +158,8 @@ class Difference(FairseqCriterion):
             "ntokens": sample["ntokens"],
             "nsentences": sample["target"].size(0),
             "sample_size": sample_size,
-            "sum_expert_reward": sum_expert_reward,
-            "sum_student_reward": sum_student_reward
+            "sum_expert_reward": sum_expert_reward.copy(),
+            "sum_student_reward": sum_student_reward.copy()
         }
         if self.report_accuracy:
             n_correct, total = self.compute_accuracy(model, net_output, sample)
@@ -185,7 +185,7 @@ class Difference(FairseqCriterion):
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.ignore_prefix_size, self.padding_idx, reduce=reduce)
             # we need to reload this after every epoch - thankfully checkpoint_last.pt is updated after a epoch and we validate only at the end of the epoch so this hack works
-            self.frozen_student, _ = load_model_ensemble([self.frozen_student], arg_overrides={"data": self.frozen_student_path, "load_pretrained_encoder_from": self.frozen_student_encoder_path})
+            self.frozen_student, _ = load_model_ensemble([self.frozen_student], arg_overrides={"data": self.frozen_student_path})#, "load_pretrained_encoder_from": self.frozen_student_encoder_path})
             self.frozen_student = self.frozen_student[-1]
             self.frozen_student.requires_grad = False
             print("Updated frozen student model to new checkpoint!")
@@ -229,7 +229,7 @@ class Difference(FairseqCriterion):
             for i in range(len(hypos)):
                 t = int(uniform(low=1, high=len(hypos[i][0]["tokens"]), size=None))
                 u = uniform(low=0.0, high=1.0, size=None)
-                if u < self.beta:
+                if u > self.beta:
                     c = choice(list(self.dict.indices.values()))
                     hypo = torch.cat((hypos[i][0]["tokens"][:t], torch.LongTensor([c]).cuda()))
                 else:
@@ -346,9 +346,11 @@ class Difference(FairseqCriterion):
         loss_sum = sum(log.get("loss", 0) for log in logging_outputs)
         expert_reward_sum = sum(log.get("sum_expert_reward", 0) for log in logging_outputs)
         student_reward_sum = sum(log.get("sum_student_reward", 0) for log in logging_outputs)
+        print([log.get("sum_expert_reward", 0) for log in logging_outputs])
+        print([log.get("ntokens", 0) for log in logging_outputs])
         ntokens = sum(log.get("ntokens", 0) for log in logging_outputs)
         sample_size = sum(log.get("sample_size", 0) for log in logging_outputs)
-
+        print(expert_reward_sum, student_reward_sum, sample_size)
         metrics.log_scalar(
             "loss", loss_sum / sample_size / math.log(2), sample_size, round=3
         )
