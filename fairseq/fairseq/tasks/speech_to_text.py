@@ -186,6 +186,11 @@ class SpeechToTextTask(LegacyFairseqTask):
                 loss, sample_size, logging_output = criterion(model, sample, valid=True)
             elif str(type(criterion)).endswith("OracleDiff'>"):
                 loss, sample_size, logging_output = criterion(model, sample, valid=True)
+            elif str(type(criterion)).endswith("Difference'>"):
+                loss, sample_size, logging_output = criterion(model, sample, valid=True)
+            elif str(type(criterion)).endswith("ImitKD'>"):
+                loss, sample_size, logging_output = criterion(model, sample, valid=True)
+
             else:
                 loss, sample_size, logging_output = criterion(model, sample)
         return loss, sample_size, logging_output

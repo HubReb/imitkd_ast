@@ -128,6 +128,7 @@ class Difference(FairseqCriterion):
         self.ignore_prefix_size = ignore_prefix_size
         self.report_accuracy = report_accuracy
         self.expert, _ = load_model_ensemble([expert], arg_overrides={"data": path})
+        self.frozen_student_filename = frozen_student
         self.frozen_student = frozen_student
         self.frozen_student_encoder_path = frozen_student_encoder_path
         self.frozen_student_path = frozen_student_path
@@ -139,18 +140,34 @@ class Difference(FairseqCriterion):
         self.eos = self.dict.eos()
         self.bpe = fastBPE.fastBPE(bpe_codes, expert_vocab_tgt)
         self.pad_idx = self.padding_idx
-        self.sentence_avg = True
+        self.sentence_avg = False
         self.beta = beta
-        self.frozen_student, _ = load_model_ensemble([self.frozen_student], arg_overrides={"data": self.frozen_student_path, "load_pretrained_encoder_from": self.frozen_student_encoder_path})
+        self.frozen_student, _ = load_model_ensemble([self.frozen_student], arg_overrides={"data": self.frozen_student_path})#, "load_pretrained_encoder_from": self.frozen_student_encoder_path})
         self.frozen_student = self.frozen_student[-1]
         self.frozen_student.requires_grad = False
+        
+
+
 
 
     def forward(self, model, sample, reduce=True, valid=False):
+        if valid:
+            loss = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
+            sample_size = (
+                sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
+            )
+            logging_output = {
+                "loss" : loss.data,
+                "ntokens": sample["ntokens"],
+                "nsentences": sample["target"].size(0),
+                "sample_size": sample_size,
+            }
+            return loss, sample_size, logging_output
         source_text = self.transform_source_tokens_into_expert_voc(sample)
         sample, sum_expert_reward, sum_student_reward, number_of_non_zero_rewards = self.generate_dataset(sample, source_text)
         net_output = model(**sample["net_input"])
         loss = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
+        number_sentences = (sample["target"].size(0))
         sample_size = (
             sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
         )
@@ -161,7 +178,8 @@ class Difference(FairseqCriterion):
             "sample_size": sample_size,
             "sum_expert_reward": sum_expert_reward.copy(),
             "sum_student_reward": sum_student_reward.copy(),
-            "non_zero_rewards": number_of_non_zero_rewards
+            "non_zero_rewards": number_of_non_zero_rewards,
+            "number_of_sentences": number_sentences
         }
         if self.report_accuracy:
             n_correct, total = self.compute_accuracy(model, net_output, sample)
@@ -187,8 +205,8 @@ class Difference(FairseqCriterion):
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.ignore_prefix_size, self.padding_idx, reduce=reduce)
             # we need to reload this after every epoch - thankfully checkpoint_last.pt is updated after a epoch and we validate only at the end of the epoch so this hack works
-            self.frozen_student, _ = load_model_ensemble([self.frozen_student], arg_overrides={"data": self.frozen_student_path, "load_pretrained_encoder_from": self.frozen_student_encoder_path})
-            self.frozen_student = self.frozen_student[-1]
+            new_frozen_student, _ = load_model_ensemble([self.frozen_student_filename], arg_overrides={"data": self.frozen_student_path})#, "load_pretrained_encoder_from": self.frozen_student_encoder_path})
+            self.frozen_student = new_frozen_student[-1]
             self.frozen_student.requires_grad = False
             print("Updated frozen student model to new checkpoint!")
         else:
@@ -364,11 +382,12 @@ class Difference(FairseqCriterion):
         metrics.log_scalar(
             "loss", loss_sum / sample_size / math.log(2), sample_size, round=3
         )
+        n_sentences =  sum(log.get("number_of_sentences", 0) for log in logging_outputs)
         metrics.log_scalar(
-            "reward_expert_over_all_samples", expert_reward_sum / sample_size, sample_size, round=3
+            "reward_expert_over_all_samples", expert_reward_sum / n_sentences, sample_size, round=3
         )
         metrics.log_scalar(
-            "reward_student_over_all_samples", student_reward_sum / sample_size, sample_size, round=3
+            "reward_student_over_all_samples", student_reward_sum / n_sentences, sample_size, round=3
         )
         if number_of_non_zero_rewards > 0:
             expert_mean = expert_reward_sum / number_of_non_zero_rewards
@@ -380,6 +399,12 @@ class Difference(FairseqCriterion):
         )
         metrics.log_scalar(
             "reward_student_over_kept_samples", student_mean, number_of_non_zero_rewards, round=3
+        )
+        metrics.log_scalar(
+            "number_of_kept_samples", utils.item(number_of_non_zero_rewards)
+        )
+        metrics.log_scalar(
+            "total_number_of_samples", utils.item(n_sentences)
         )
         total = utils.item(sum(log.get("total", 0) for log in logging_outputs))
         if total > 0:
