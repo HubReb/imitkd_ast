@@ -315,6 +315,9 @@ class SpeechToTextDataset(FairseqDataset):
         prev_output_tokens = None
         ntokens = None
         n_frames = torch.tensor([s.size(0) for _, s, _, _, _ in samples], dtype=torch.long)
+        n_frames, order = n_frames.sort(descending=True)
+        indices = indices.index_select(0, order)
+        frames = frames.index_select(0, order)
         if self.tgt_texts is not None:
             target = fairseq_data_utils.collate_tokens(
                 [t for _, _, t, _, _ in samples],
@@ -323,11 +326,8 @@ class SpeechToTextDataset(FairseqDataset):
                 left_pad=False,
                 move_eos_to_beginning=False,
             )
+            target = target.index_select(0, order)
             if self.src_texts is None:
-                n_frames, order = n_frames.sort(descending=True)
-                indices = indices.index_select(0, order)
-                frames = frames.index_select(0, order)
-                target = target.index_select(0, order)
                 target_lengths = torch.tensor(
                     [t.size(0) for _, _, t, _, _ in samples], dtype=torch.long
                 ).index_select(0, order)
@@ -343,11 +343,16 @@ class SpeechToTextDataset(FairseqDataset):
                 pr_tgt_tokens = [sample[4] for sample in samples]
                 source_tokens = []
             else:
-                source_tokens = [sample[3] for sample in samples]
-                pr_tgt_tokens = [sample[4] for sample in samples]
+                # source_tokens = [sample[3] for sample in samples]
+                # pr_tgt_tokens = [sample[4] for sample in samples]
+                source_tokens = []
+                pr_tgt_tokens = []
+                for index in order:
+                    pr_tgt_tokens.append(samples[index][3])
+                    source_tokens.append(samples[index][4])
                 target_lengths = torch.tensor(
                     [t.size(0) for _, _, t, _, _ in samples], dtype=torch.long
-                )
+                ).index_select(0, order)
                 prev_output_tokens = fairseq_data_utils.collate_tokens(
                     [t for _, _, t, _, _ in samples],
                     self.tgt_dict.pad(),
@@ -355,6 +360,7 @@ class SpeechToTextDataset(FairseqDataset):
                     left_pad=False,
                     move_eos_to_beginning=True,
                 )
+                prev_output_tokens = prev_output_tokens.index_select(0, order)
                 ntokens = sum(t.size(0) for _, _, t, _, _ in samples)
         out = {
             "id": indices,
