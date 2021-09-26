@@ -118,7 +118,6 @@ def imit_kd_loss(
             "ntokens": generated_dataset["ntokens"],
             "nsentences": generated_dataset["nsentences"],
             }
-
     with torch.no_grad():
         expert_out = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=True).detach()
         expert_preds = expert_out.argmax(-1)
