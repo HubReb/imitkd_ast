@@ -152,6 +152,7 @@ class Difference(FairseqCriterion):
 
     def forward(self, model, sample, reduce=True, valid=False):
         if valid:
+            net_output = model(**sample["net_input"])
             loss = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
             sample_size = (
                 sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
@@ -162,9 +163,13 @@ class Difference(FairseqCriterion):
                 "nsentences": sample["target"].size(0),
                 "sample_size": sample_size,
             }
+            if self.report_accuracy:
+                n_correct, total = self.compute_accuracy(model, net_output, sample)
+                logging_output["n_correct"] = utils.item(n_correct.data)
+                logging_output["total"] = utils.item(total.data)
             return loss, sample_size, logging_output
         source_text = self.transform_source_tokens_into_expert_voc(sample)
-        sample, sum_expert_reward, sum_student_reward, number_of_non_zero_rewards = self.generate_dataset(sample, source_text)
+        sample, sum_expert_reward, sum_student_reward, number_of_non_zero_rewards, std_expert_reward, std_student_reward = self.generate_dataset(sample, source_text)
         net_output = model(**sample["net_input"])
         loss = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
         number_sentences = (sample["target"].size(0))
@@ -178,6 +183,8 @@ class Difference(FairseqCriterion):
             "sample_size": sample_size,
             "sum_expert_reward": sum_expert_reward.copy(),
             "sum_student_reward": sum_student_reward.copy(),
+            "std_expert_reward": std_expert_reward.copy(),
+            "std_student_reward": std_student_reward.copy(),
             "non_zero_rewards": number_of_non_zero_rewards,
             "number_of_sentences": number_sentences
         }
@@ -356,7 +363,7 @@ class Difference(FairseqCriterion):
                 non_zero_rewards += 1
         sample["reward_difference"] = torch.FloatTensor(reward_difference).cuda()
         sample["partial_hypos"] = partial_hypos.clone().detach()
-        return sample, np.sum(reward_expert), np.sum(reward_student), non_zero_rewards
+        return sample, np.sum(reward_expert), np.sum(reward_student), non_zero_rewards, reward_expert, reward_student
 
 
     def compute_accuracy(self, model, net_output, sample):
@@ -376,6 +383,8 @@ class Difference(FairseqCriterion):
         loss_sum = sum(log.get("loss", 0) for log in logging_outputs)
         expert_reward_sum = sum(log.get("sum_expert_reward", 0) for log in logging_outputs)
         student_reward_sum = sum(log.get("sum_student_reward", 0) for log in logging_outputs)
+        expert_reward_std = np.std([log.get("std_expert_reward", 0) for log in logging_outputs])
+        student_reward_std = np.std([log.get("std_student_reward", 0) for log in logging_outputs])
         number_of_non_zero_rewards = sum(log.get("non_zero_rewards", 0) for log in logging_outputs)
         ntokens = sum(log.get("ntokens", 0) for log in logging_outputs)
         sample_size = sum(log.get("sample_size", 0) for log in logging_outputs)
@@ -383,15 +392,16 @@ class Difference(FairseqCriterion):
             "loss", loss_sum / sample_size / math.log(2), sample_size, round=3
         )
         n_sentences =  sum(log.get("number_of_sentences", 0) for log in logging_outputs)
-        metrics.log_scalar(
-            "reward_expert_over_all_samples", expert_reward_sum / n_sentences, sample_size, round=3
-        )
-        metrics.log_scalar(
-            "reward_student_over_all_samples", student_reward_sum / n_sentences, sample_size, round=3
-        )
+
         if number_of_non_zero_rewards > 0:
             expert_mean = expert_reward_sum / number_of_non_zero_rewards
             student_mean = student_reward_sum / number_of_non_zero_rewards
+            metrics.log_scalar(
+                "reward_expert_over_all_samples", expert_reward_sum / n_sentences, sample_size, round=3
+            )
+            metrics.log_scalar(
+                "reward_student_over_all_samples", student_reward_sum / n_sentences, sample_size, round=3
+            )
         else:
             expert_mean, student_mean = 0, 0
         metrics.log_scalar(
@@ -400,6 +410,13 @@ class Difference(FairseqCriterion):
         metrics.log_scalar(
             "reward_student_over_kept_samples", student_mean, number_of_non_zero_rewards, round=3
         )
+        metrics.log_scalar(
+            "reward_expert_over_kept_samples_std", utils.item(expert_reward_std)
+        )
+        metrics.log_scalar(
+            "reward_student_over_kept_samples_std", utils.item(student_reward_std)
+        )
+ 
         metrics.log_scalar(
             "number_of_kept_samples", utils.item(number_of_non_zero_rewards)
         )
