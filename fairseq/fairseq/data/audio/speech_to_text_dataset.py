@@ -311,14 +311,10 @@ class SpeechToTextDataset(FairseqDataset):
             [s for _, s, _, _, _ in samples], self.data_cfg.use_audio_input
         )
         # sort samples by descending number of frames
-        n_frames = torch.tensor([s.size(0) for _, s, _, _, _ in samples], dtype=torch.long)
-        n_frames, order = n_frames.sort(descending=True)
-        indices = indices.index_select(0, order)
-        frames = frames.index_select(0, order)
-
         target, target_lengths = None, None
         prev_output_tokens = None
         ntokens = None
+        n_frames = torch.tensor([s.size(0) for _, s, _, _, _ in samples], dtype=torch.long)
         if self.tgt_texts is not None:
             target = fairseq_data_utils.collate_tokens(
                 [t for _, _, t, _, _ in samples],
@@ -328,6 +324,9 @@ class SpeechToTextDataset(FairseqDataset):
                 move_eos_to_beginning=False,
             )
             if self.src_texts is None:
+                n_frames, order = n_frames.sort(descending=True)
+                indices = indices.index_select(0, order)
+                frames = frames.index_select(0, order)
                 target = target.index_select(0, order)
                 target_lengths = torch.tensor(
                     [t.size(0) for _, _, t, _, _ in samples], dtype=torch.long
