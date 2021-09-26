@@ -341,6 +341,7 @@ class SpeechToTextDataset(FairseqDataset):
                 prev_output_tokens = prev_output_tokens.index_select(0, order)
                 ntokens = sum(t.size(0) for _, _, t, _, _ in samples)
                 pr_tgt_tokens = [sample[4] for sample in samples]
+                source_tokens = []
             else:
                 source_tokens = [sample[3] for sample in samples]
                 pr_tgt_tokens = [sample[4] for sample in samples]
