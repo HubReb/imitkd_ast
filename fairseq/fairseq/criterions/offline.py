@@ -268,7 +268,8 @@ class Difference(FairseqCriterion):
                     c = torch.argmax(self.frozen_student.get_normalized_probs(self.frozen_student(**sample_frozen["net_input"]), log_probs=True)[:, t-1, :])
                     hypo = torch.cat((hypos[i][0]["tokens"][:t], torch.LongTensor([c]).cuda()))
                 else:
-                    hypo = hypos[i][0]["tokens"][:t+1].clone().detach()
+                    c = choice(list(self.dict.indices.values()))
+                    hypo = torch.cat((hypos[i][0]["tokens"][:t], torch.LongTensor([c]).cuda()))
                 partial_hypos.append(hypo)
                 expert_input.append(
                     self.expert_vocab_tgt.encode_line(
