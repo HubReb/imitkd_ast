@@ -170,7 +170,19 @@ class Difference(FairseqCriterion):
             return loss, sample_size, logging_output
         source_text = self.transform_source_tokens_into_expert_voc(sample)
         sample, sum_expert_reward, sum_student_reward, number_of_non_zero_rewards, std_expert_reward, std_student_reward = self.generate_dataset(sample, source_text)
-        net_output = model(**sample["net_input"])
+        sample_s= {
+            "id": sample["id"],
+            "net_input" : { 
+            "src_tokens": sample["net_input"]["src_tokens"],
+            "src_lengths":sample["net_input"]["src_lengths"],
+            "prev_output_tokens": sample["net_input"]["prev_output_tokens"]
+            },
+            "target": sample["target"],
+            "target_lengths": sample["target_lengths"],
+            "ntokens": sample["ntokens"],
+            "nsentences": sample["nsentences"],
+            }
+        net_output = model(**sample_s["net_input"])
         loss = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
         number_sentences = (sample["target"].size(0))
         sample_size = (
@@ -249,23 +261,54 @@ class Difference(FairseqCriterion):
         with torch.no_grad():
             student_generator = SequenceGenerator([self.frozen_student], self.dict, beam_size=5)
             expert_generator = SequenceGenerator([self.expert], self.expert_vocab_tgt, beam_size=5)
+            out = {
+                "id": sample["id"],
+                "net_input": {
+                    "src_tokens": source_texts.cuda(),
+                    "src_lengths": [len(text) for text in source_texts],
+                    "prev_output_tokens": [],
+                },
+                "target": sample["target"],
+                "target_lengths": sample["target_lengths"],
+                "ntokens": sample["ntokens"],
+                "nsentences": sample["nsentences"],
+                }
+ 
+            sample_s= {
+                "id": sample["id"],
+                "net_input" : { 
+                "src_tokens": sample["net_input"]["src_tokens"],
+                "src_lengths":sample["net_input"]["src_lengths"],
+                "prev_output_tokens": sample["net_input"]["prev_output_tokens"]
+                },
+                "target": sample["target"],
+                "target_lengths": sample["target_lengths"],
+                "ntokens": sample["ntokens"],
+                "nsentences": sample["nsentences"],
+            }
             student_generator.cuda()
-            hypos = student_generator._generate(sample)
+            hypos = student_generator._generate(sample_s)
             expert_input = []
             partial_hypos = []
             for i in range(len(hypos)):
                 t = int(uniform(low=1, high=len(hypos[i][0]["tokens"]), size=None))
                 u = uniform(low=0.0, high=1.0, size=None)
+                worked, total = 0, 0
                 if u > 0.1:
                     sample_frozen = sample.copy()
                     sample_frozen = {
                         "net_input": {
                             "src_tokens": sample["net_input"]["src_tokens"][i].unsqueeze(0).cuda(),
-                            "src_lengths":sample["net_input"]["src_lengths"][i].unsqueeze(0),
+                            "src_lengths": sample["net_input"]["src_lengths"][i].unsqueeze(0),
                             "prev_output_tokens": hypos[i][0]["tokens"][:t].unsqueeze(0),
                         },
                     }
-                    c = torch.argmax(self.frozen_student.get_normalized_probs(self.frozen_student(**sample_frozen["net_input"]), log_probs=True)[:, t-1, :])
+                    try:
+                        c = torch.argmax(self.frozen_student.get_normalized_probs(self.frozen_student(**sample_frozen["net_input"]), log_probs=True)[:, t-1, :])
+                        worked += 1
+                    except RuntimeError:
+                        c = hypos[i][0]["tokens"][t]
+                    total += 1
                     hypo = torch.cat((hypos[i][0]["tokens"][:t], torch.LongTensor([c]).cuda()))
                 else:
                     c = choice(list(self.dict.indices.values()))
@@ -281,6 +324,8 @@ class Difference(FairseqCriterion):
                         ])[0], add_if_not_exist=False, append_eos=False
                     )
                 )
+            if total > 0:
+                print(f"{worked/total} of getting normalized probs worked out")
             partial_hypos = collate_tokens(
                 partial_hypos,
                 self.dict.pad(),
@@ -288,6 +333,14 @@ class Difference(FairseqCriterion):
                 left_pad=False,
                 move_eos_to_beginning=False
             )
+            sample_frozen = {
+                "net_input": {
+                    "src_tokens": sample["net_input"]["src_tokens"],
+                    "src_lengths": sample["net_input"]["src_lengths"],
+                    "prev_output_tokens": partial_hypos.cuda() 
+                },
+            }
+            hypos = student_generator._generate(sample_s)
             expert_input = collate_tokens(
                 expert_input,
                 self.expert_vocab_tgt.pad(),
@@ -341,7 +394,7 @@ class Difference(FairseqCriterion):
             ref = utils.strip_pad(target[i, :], self.dict.pad()).cpu()
             ref_string = self.dict.string(ref, bpe_symbol='sentencepiece', escape_unk=True)
             r = self.dict.encode_line(ref_string, add_if_not_exist=False)
-            h = self.dict.string(hypos_i[0]['tokens'].int().cpu(), bpe_symbol='sentencepiece')
+            h = self.dict.string(utils.strip_pad(hypos_i[0]['tokens'].int().cpu(), self.dict.pad()), bpe_symbol='sentencepiece')
             h = self.dict.encode_line(h, add_if_not_exist=False)
             # use +1 smoothing for sentence BLEU
             bleu_student_hypo = student_scorer.score(r, h)
@@ -360,7 +413,7 @@ class Difference(FairseqCriterion):
             if bleu_student_hypo > bleu_expert_hypo:
                 reward_difference.append(0)
             else:
-                reward_difference.append((bleu_student_partial_hypo - (bleu_expert_hypo - bleu_student_hypo))**2)
+                reward_difference.append(((torch.sigmoid(torch.tensor(bleu_student_partial_hypo)) - torch.sigmoid(torch.tensor(bleu_expert_hypo - bleu_student_hypo)))**2).tolist())
                 non_zero_rewards += 1
         sample["reward_difference"] = torch.FloatTensor(reward_difference).cuda()
         sample["partial_hypos"] = partial_hypos.clone().detach()
@@ -412,10 +465,10 @@ class Difference(FairseqCriterion):
             "reward_student_over_kept_samples", student_mean, number_of_non_zero_rewards, round=3
         )
         metrics.log_scalar(
-            "reward_expert_over_all_samples_std", utils.item(expert_reward_std)
+            "reward_expert_over_kept_samples_std", utils.item(expert_reward_std)
         )
         metrics.log_scalar(
-            "reward_student_over_all_samples_std", utils.item(student_reward_std)
+            "reward_student_over_kept_samples_std", utils.item(student_reward_std)
         )
  
         metrics.log_scalar(
