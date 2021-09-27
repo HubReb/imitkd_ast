@@ -340,7 +340,7 @@ class Difference(FairseqCriterion):
                     "prev_output_tokens": partial_hypos.cuda() 
                 },
             }
-            hypos = student_generator._generate(sample_s)
+            hypos = student_generator._generate(sample_frozen)
             expert_input = collate_tokens(
                 expert_input,
                 self.expert_vocab_tgt.pad(),
