@@ -256,7 +256,7 @@ class Difference(FairseqCriterion):
             for i in range(len(hypos)):
                 t = int(uniform(low=1, high=len(hypos[i][0]["tokens"]), size=None))
                 u = uniform(low=0.0, high=1.0, size=None)
-                if u > self.beta:
+                if u > 0.1:
                     sample_frozen = sample.copy()
                     sample_frozen = {
                         "net_input": {
@@ -345,14 +345,14 @@ class Difference(FairseqCriterion):
             h = self.dict.encode_line(h, add_if_not_exist=False)
             # use +1 smoothing for sentence BLEU
             bleu_student_hypo = student_scorer.score(r, h)
-            h_partial = self.dict.string(partial_hypos[i].int().cpu(), bpe_symbol='sentencepiece')
+            h_partial = self.dict.string(utils.strip_pad(partial_hypos[i].int().cpu(), self.dict.pad()), bpe_symbol='sentencepiece')
             h_partial = self.dict.encode_line(h_partial, add_if_not_exist=False)
             # use +1 smoothing for sentence BLEU
             bleu_student_partial_hypo = student_scorer.score(r, h_partial)
             ref = self.expert_vocab_tgt.encode_line(
                     " ".join(self.bpe.apply([ref_string])), add_if_not_exist=False, append_eos=False
                 )
-            h = self.expert_vocab_tgt.string(expert_hypos[i].int().cpu(), bpe_symbol='fastBPE')
+            h = self.expert_vocab_tgt.string(utils.strip_pad(expert_hypos[i].int().cpu(), self.expert_vocab_tgt.pad()), bpe_symbol='fastBPE')
             h = self.expert_vocab_tgt.encode_line(h, add_if_not_exist=False)
             bleu_expert_hypo = expert_scorer.score(ref, h)
             reward_expert.append(bleu_expert_hypo)
@@ -360,7 +360,7 @@ class Difference(FairseqCriterion):
             if bleu_student_hypo > bleu_expert_hypo:
                 reward_difference.append(0)
             else:
-                reward_difference.append(((torch.sigmoid(torch.tensor(bleu_student_partial_hypo)) - torch.sigmoid(torch.tensor(bleu_expert_hypo - bleu_student_hypo)))**2).tolist())
+                reward_difference.append((bleu_student_partial_hypo - (bleu_expert_hypo - bleu_student_hypo))**2)
                 non_zero_rewards += 1
         sample["reward_difference"] = torch.FloatTensor(reward_difference).cuda()
         sample["partial_hypos"] = partial_hypos.clone().detach()
@@ -412,10 +412,10 @@ class Difference(FairseqCriterion):
             "reward_student_over_kept_samples", student_mean, number_of_non_zero_rewards, round=3
         )
         metrics.log_scalar(
-            "reward_expert_over_kept_samples_std", utils.item(expert_reward_std)
+            "reward_expert_over_all_samples_std", utils.item(expert_reward_std)
         )
         metrics.log_scalar(
-            "reward_student_over_kept_samples_std", utils.item(student_reward_std)
+            "reward_student_over_all_samples_std", utils.item(student_reward_std)
         )
  
         metrics.log_scalar(
