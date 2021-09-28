@@ -152,6 +152,18 @@ class Difference(FairseqCriterion):
 
     def forward(self, model, sample, reduce=True, valid=False):
         if valid:
+            sample_s= {
+                "id": sample["id"],
+                "net_input" : { 
+                "src_tokens": sample["net_input"]["src_tokens"],
+                "src_lengths":sample["net_input"]["src_lengths"],
+                "prev_output_tokens": sample["net_input"]["prev_output_tokens"]
+                },
+                "target": sample["target"],
+                "target_lengths": sample["target_lengths"],
+                "ntokens": sample["ntokens"],
+                "nsentences": sample["nsentences"],
+            }
             net_output = model(**sample["net_input"])
             loss = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
             sample_size = (
@@ -413,7 +425,7 @@ class Difference(FairseqCriterion):
             if bleu_student_hypo > bleu_expert_hypo:
                 reward_difference.append(0)
             else:
-                reward_difference.append(((torch.sigmoid(torch.tensor(bleu_student_partial_hypo)) - torch.sigmoid(torch.tensor(bleu_expert_hypo - bleu_student_hypo)))**2).tolist())
+                reward_difference.append(abs(bleu_student_partial_hypo - bleu_expert_hypo))
                 non_zero_rewards += 1
         sample["reward_difference"] = torch.FloatTensor(reward_difference).cuda()
         sample["partial_hypos"] = partial_hypos.clone().detach()
