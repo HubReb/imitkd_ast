@@ -142,7 +142,7 @@ class Difference(FairseqCriterion):
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
         self.beta = beta
-        self.frozen_student, _ = load_model_ensemble([self.frozen_student], arg_overrides={"data": self.frozen_student_path})#, "load_pretrained_encoder_from": self.frozen_student_encoder_path})
+        self.frozen_student, _ = load_model_ensemble([self.frozen_student], arg_overrides={"data": self.frozen_student_path, "load_pretrained_encoder_from": self.frozen_student_encoder_path})
         self.frozen_student = self.frozen_student[-1]
         self.frozen_student.requires_grad = False
         
@@ -236,7 +236,7 @@ class Difference(FairseqCriterion):
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.ignore_prefix_size, self.padding_idx, reduce=reduce)
             # we need to reload this after every epoch - thankfully checkpoint_last.pt is updated after a epoch and we validate only at the end of the epoch so this hack works
-            new_frozen_student, _ = load_model_ensemble([self.frozen_student_filename], arg_overrides={"data": self.frozen_student_path})#, "load_pretrained_encoder_from": self.frozen_student_encoder_path})
+            new_frozen_student, _ = load_model_ensemble([self.frozen_student_filename], arg_overrides={"data": self.frozen_student_path, "load_pretrained_encoder_from": self.frozen_student_encoder_path})
             self.frozen_student = new_frozen_student[-1]
             self.frozen_student.requires_grad = False
             print("Updated frozen student model to new checkpoint!")
@@ -336,8 +336,8 @@ class Difference(FairseqCriterion):
                         ])[0], add_if_not_exist=False, append_eos=False
                     )
                 )
-            if total > 0:
-                print(f"{worked/total} of getting normalized probs worked out")
+            # if total > 0:
+                # print(f"{worked/total} of getting normalized probs worked out")
             partial_hypos = collate_tokens(
                 partial_hypos,
                 self.dict.pad(),
@@ -397,35 +397,38 @@ class Difference(FairseqCriterion):
         """
         target = sample['target'].data.int()
         reward_difference = []
-        student_scorer = BleuScorer(self.dict.pad(), self.dict.eos(), self.dict.unk())
-        expert_scorer = BleuScorer(self.expert_vocab_tgt.pad(), self.expert_vocab_tgt.eos(), self.expert_vocab_tgt.unk())
+        # student_scorer = BleuScorer(self.dict.pad(), self.dict.eos(), self.dict.unk())
+        # expert_scorer = BleuScorer(self.expert_vocab_tgt.pad(), self.expert_vocab_tgt.eos(), self.expert_vocab_tgt.unk())
         reward_expert = []
         reward_student = []
         non_zero_rewards = 0
         for i, hypos_i in enumerate(hypos):     # iterate over dataset
             ref = utils.strip_pad(target[i, :], self.dict.pad()).cpu()
             ref_string = self.dict.string(ref, bpe_symbol='sentencepiece', escape_unk=True)
-            r = self.dict.encode_line(ref_string, add_if_not_exist=False)
+            # r = self.dict.encode_line(ref_string, add_if_not_exist=False)
             h = self.dict.string(utils.strip_pad(hypos_i[0]['tokens'].int().cpu(), self.dict.pad()), bpe_symbol='sentencepiece')
+            jaccard_sim_student = jaccard_sim(ref_string, h)
             h = self.dict.encode_line(h, add_if_not_exist=False)
             # use +1 smoothing for sentence BLEU
-            bleu_student_hypo = student_scorer.score(r, h)
+            # bleu_student_hypo = student_scorer.score(r, h)
             h_partial = self.dict.string(utils.strip_pad(partial_hypos[i].int().cpu(), self.dict.pad()), bpe_symbol='sentencepiece')
-            h_partial = self.dict.encode_line(h_partial, add_if_not_exist=False)
+            jaccard_sim_student_partial = jaccard_sim(ref_string, h_partial)
+            # h_partial = self.dict.encode_line(h_partial, add_if_not_exist=False)
             # use +1 smoothing for sentence BLEU
-            bleu_student_partial_hypo = student_scorer.score(r, h_partial)
+            # bleu_student_partial_hypo = student_scorer.score(r, h_partial)
             ref = self.expert_vocab_tgt.encode_line(
-                    " ".join(self.bpe.apply([ref_string])), add_if_not_exist=False, append_eos=False
-                )
+                    self.bpe.apply([ref_string])[0], add_if_not_exist=False, append_eos=False
+            )
             h = self.expert_vocab_tgt.string(utils.strip_pad(expert_hypos[i].int().cpu(), self.expert_vocab_tgt.pad()), bpe_symbol='fastBPE')
-            h = self.expert_vocab_tgt.encode_line(h, add_if_not_exist=False)
-            bleu_expert_hypo = expert_scorer.score(ref, h)
-            reward_expert.append(bleu_expert_hypo)
-            reward_student.append(bleu_student_hypo)
-            if bleu_student_hypo > bleu_expert_hypo:
+            jaccard_sim_expert = jaccard_sim(ref_string, h)
+            # h = self.expert_vocab_tgt.encode_line(h, add_if_not_exist=False)
+            # bleu_expert_hypo = expert_scorer.score(ref, h)
+            reward_expert.append(jaccard_sim_expert)
+            reward_student.append(jaccard_sim_student)
+            if jaccard_sim_student > jaccard_sim_expert:
                 reward_difference.append(0)
             else:
-                reward_difference.append(abs(bleu_student_partial_hypo - bleu_expert_hypo))
+                reward_difference.append(abs(jaccard_sim_student_partial - jaccard_sim_expert))
                 non_zero_rewards += 1
         sample["reward_difference"] = torch.FloatTensor(reward_difference).cuda()
         sample["partial_hypos"] = partial_hypos.clone().detach()
@@ -552,3 +555,8 @@ def collate_tokens(values, pad_idx, eos, left_pad, move_eos_to_beginning):
     return res
 
 
+def jaccard_sim(str1, str2):
+    a = set(str1.split())
+    b = set(str2.split())
+    c = a.intersection(b)
+    return float(len(c)) / (len(a) + len(b) - len(c))
