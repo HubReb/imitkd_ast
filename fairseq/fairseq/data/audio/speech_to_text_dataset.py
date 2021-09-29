@@ -214,7 +214,6 @@ class SpeechToTextDataset(FairseqDataset):
         tgt_dict: Optional[Dictionary] = None,
         pre_tokenizer=None,
         bpe_tokenizer=None,
-        bpe_target_texts=None
     ):
         self.split, self.is_train_split = split, is_train_split
         self.data_cfg = data_cfg
@@ -231,7 +230,6 @@ class SpeechToTextDataset(FairseqDataset):
             tgt_dict is not None and tgt_texts is not None
         )
         self.src_texts, self.tgt_texts = src_texts, tgt_texts
-        self.pr_tgt_texts = bpe_target_texts
         self.src_langs, self.tgt_langs = src_langs, tgt_langs
         self.tgt_dict = tgt_dict
         self.check_tgt_lang_tag()
@@ -293,12 +291,11 @@ class SpeechToTextDataset(FairseqDataset):
                 tokenized, add_if_not_exist=False, append_eos=True
             ).long()
             source_text = self.src_texts[index]
-            pr_tgt_text = self.pr_tgt_texts[index]
             if self.data_cfg.prepend_tgt_lang_tag:
                 lang_tag = self.LANG_TAG_TEMPLATE.format(self.tgt_langs[index])
                 lang_tag_idx = self.tgt_dict.index(lang_tag)
                 target = torch.cat((torch.LongTensor([lang_tag_idx]), target), 0)
-        return index, source, target, source_text, pr_tgt_text
+        return index, source, target, source_text
 
     def __len__(self):
         return self.n_samples
@@ -306,21 +303,21 @@ class SpeechToTextDataset(FairseqDataset):
     def collater(self, samples: List[Tuple[int, torch.Tensor, torch.Tensor, str]]) -> Dict:
         if len(samples) == 0:
             return {}
-        indices = torch.tensor([i for i, _, _, _, _ in samples], dtype=torch.long)
+        indices = torch.tensor([i for i, _, _, _ in samples], dtype=torch.long)
         frames = _collate_frames(
-            [s for _, s, _, _, _ in samples], self.data_cfg.use_audio_input
+            [s for _, s, _, __ in samples], self.data_cfg.use_audio_input
         )
         # sort samples by descending number of frames
         target, target_lengths = None, None
         prev_output_tokens = None
         ntokens = None
-        n_frames = torch.tensor([s.size(0) for _, s, _, _, _ in samples], dtype=torch.long)
+        n_frames = torch.tensor([s.size(0) for _, s, _, _ in samples], dtype=torch.long)
         n_frames, order = n_frames.sort(descending=True)
         indices = indices.index_select(0, order)
         frames = frames.index_select(0, order)
         if self.tgt_texts is not None:
             target = fairseq_data_utils.collate_tokens(
-                [t for _, _, t, _, _ in samples],
+                [t for _, _, t, _ in samples],
                 self.tgt_dict.pad(),
                 self.tgt_dict.eos(),
                 left_pad=False,
@@ -329,39 +326,35 @@ class SpeechToTextDataset(FairseqDataset):
             target = target.index_select(0, order)
             if self.src_texts is None:
                 target_lengths = torch.tensor(
-                    [t.size(0) for _, _, t, _, _ in samples], dtype=torch.long
+                    [t.size(0) for _, _, t, _ in samples], dtype=torch.long
                 ).index_select(0, order)
                 prev_output_tokens = fairseq_data_utils.collate_tokens(
-                    [t for _, _, t, _, _ in samples],
+                    [t for _, _, t, _ in samples],
                     self.tgt_dict.pad(),
                     self.tgt_dict.eos(),
                     left_pad=False,
                     move_eos_to_beginning=True,
                 )
                 prev_output_tokens = prev_output_tokens.index_select(0, order)
-                ntokens = sum(t.size(0) for _, _, t, _, _ in samples)
-                pr_tgt_tokens = [sample[4] for sample in samples]
+                ntokens = sum(t.size(0) for _, _, t, _ in samples)
                 source_tokens = []
             else:
                 # source_tokens = [sample[3] for sample in samples]
-                # pr_tgt_tokens = [sample[4] for sample in samples]
                 source_tokens = []
-                pr_tgt_tokens = []
                 for index in order:
-                    pr_tgt_tokens.append(samples[index][3])
-                    source_tokens.append(samples[index][4])
+                    source_tokens.append(samples[index][3])
                 target_lengths = torch.tensor(
-                    [t.size(0) for _, _, t, _, _ in samples], dtype=torch.long
+                    [t.size(0) for _, _, t, _ in samples], dtype=torch.long
                 ).index_select(0, order)
                 prev_output_tokens = fairseq_data_utils.collate_tokens(
-                    [t for _, _, t, _, _ in samples],
+                    [t for _, _, t, _ in samples],
                     self.tgt_dict.pad(),
                     self.tgt_dict.eos(),
                     left_pad=False,
                     move_eos_to_beginning=True,
                 )
                 prev_output_tokens = prev_output_tokens.index_select(0, order)
-                ntokens = sum(t.size(0) for _, _, t, _, _ in samples)
+                ntokens = sum(t.size(0) for _, _, t, _ in samples)
         out = {
             "id": indices,
             "net_input": {
@@ -371,7 +364,6 @@ class SpeechToTextDataset(FairseqDataset):
                 "src_text": source_tokens
             },
             "target": target,
-            "pr_target": pr_tgt_tokens,
             "target_lengths": target_lengths,
             "ntokens": ntokens,
             "nsentences": len(samples),
@@ -417,7 +409,6 @@ class SpeechToTextDatasetCreator(object):
     KEY_TGT_TEXT = "tgt_text"
     # optional columns
     KEY_SPEAKER, KEY_SRC_TEXT = "speaker", "src_text"
-    KEY_PROC_T = "pr_tgt_text"
     KEY_SRC_LANG, KEY_TGT_LANG = "src_lang", "tgt_lang"
     # default values
     DEFAULT_SPEAKER = DEFAULT_SRC_TEXT = DEFAULT_LANG = ""
@@ -434,7 +425,6 @@ class SpeechToTextDatasetCreator(object):
         bpe_tokenizer,
     ) -> SpeechToTextDataset:
         audio_paths, n_frames, src_texts, tgt_texts, ids = [], [], [], [], []
-        bpe_target_texts = []
         speakers, src_langs, tgt_langs = [], [], []
         for s in samples:
             ids.extend([ss[cls.KEY_ID] for ss in s])
@@ -445,9 +435,6 @@ class SpeechToTextDatasetCreator(object):
             tgt_texts.extend([ss[cls.KEY_TGT_TEXT] for ss in s])
             src_texts.extend(
                 [ss.get(cls.KEY_SRC_TEXT, cls.DEFAULT_SRC_TEXT) for ss in s]
-            )
-            bpe_target_texts.extend(
-                [ss.get(cls.KEY_PROC_T, cls.DEFAULT_SRC_TEXT) for ss in s]
             )
             speakers.extend([ss.get(cls.KEY_SPEAKER, cls.DEFAULT_SPEAKER) for ss in s])
             src_langs.extend([ss.get(cls.KEY_SRC_LANG, cls.DEFAULT_LANG) for ss in s])
@@ -467,7 +454,6 @@ class SpeechToTextDatasetCreator(object):
             tgt_dict,
             pre_tokenizer,
             bpe_tokenizer,
-            bpe_target_texts
         )
 
     @classmethod
