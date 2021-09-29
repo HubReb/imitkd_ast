@@ -5,21 +5,18 @@
 
 import math
 from dataclasses import dataclass, field
-from random import randint
 
-from sacremoses import MosesDetokenizer
 import sentencepiece as spm
 import fastBPE
 
 import torch
-from torch.autograd import Variable
 from numpy.random import uniform
 
+from omegaconf import II
+
 from fairseq import metrics, utils
-from fairseq.scoring import bleu
 from fairseq.criterions import FairseqCriterion, register_criterion
 from fairseq.dataclass import FairseqDataclass
-from omegaconf import II
 from fairseq.checkpoint_utils import load_model_ensemble
 from fairseq.data import Dictionary
 from fairseq.sequence_generator import SequenceGenerator
@@ -121,14 +118,14 @@ def imit_kd_loss(
     with torch.no_grad():
         expert_out = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=True).detach()
         expert_preds = expert_out.argmax(-1)
-        """
         for i, t in enumerate(expert_preds):
+            """
             print(i)
-            print("student input :" , encoded_prevs[i])
+            print("student input :" , expert_vocab_tgt.string(expert_vocab_tgt.encode_line(encoded_prevs[i], add_if_not_exist=False, append_eos=True), bpe_symbol='fastBPE', escape_unk=True))
             print("expert prediction: ", expert_vocab_tgt.string(
                         utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True
                     )
-                )
+            )
             print(" ".join(sp_model.EncodeAsPieces(
                     expert_vocab_tgt.string(
                         utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True
@@ -137,7 +134,7 @@ def imit_kd_loss(
             )
             )
             print("target: ", model_dict.string(generated_dataset["target"][i], bpe_symbol='sentencepiece', escape_unk=True))
-        """
+            """
         expert_preds_in_model_vocab = [
                 model_dict.encode_line(
                     " ".join(sp_model.EncodeAsPieces(
@@ -273,11 +270,11 @@ class ImitKD(FairseqCriterion):
             hypos = student_generator._generate(sample)
             targets = sample["net_input"]["prev_output_tokens"].data.tolist()
             max_length = max([len(i) for i in targets])     # let's avoid blowing up the GPU RAM, shall we?
-            for i in range(len(hypos)):
+            for i, hypo in enumerate(hypos):
                 u = uniform(low=0.0, high=1.0, size=None)
                 if u > self.beta:
                     # print(i, "is student prediction!")
-                    targets[i] = hypos[i][0]["tokens"][:max_length].clone().detach()
+                    targets[i] = hypo[0]["tokens"][:max_length].clone().detach()
                 else:
                     targets[i] = torch.tensor(targets[i]).clone().detach()
             sample["net_input"]["prev_output_tokens"] = collate_tokens(
@@ -305,7 +302,6 @@ class ImitKD(FairseqCriterion):
     def reduce_metrics(cls, logging_outputs) -> None:
         """Aggregate logging outputs from data parallel training."""
         loss_sum = sum(log.get("loss", 0) for log in logging_outputs)
-        ntokens = sum(log.get("ntokens", 0) for log in logging_outputs)
         sample_size = sum(log.get("sample_size", 0) for log in logging_outputs)
 
         metrics.log_scalar(
@@ -343,7 +339,7 @@ class ImitKD(FairseqCriterion):
         source_text = sample["net_input"]["src_text"]
         source_texts = []
         for line in source_text:
-            if type(line) == list:
+            if isinstance(line, list):
                 for text in line:
                     source_texts.append(self.expert_vocab_src.encode_line(text, add_if_not_exist=False, append_eos=True))
             else:
@@ -377,5 +373,3 @@ def collate_tokens(values, pad_idx, eos, left_pad, move_eos_to_beginning):
         else:
             copy_tensor(v, res[i][:len(v)])
     return res
-
-
