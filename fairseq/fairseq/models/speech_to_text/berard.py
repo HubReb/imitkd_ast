@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
 from ast import literal_eval
-from typing import List, Tuple
+from typing import List, Tuple, Dict
+import math
 
 import torch
 import torch.nn as nn
+from torch import Tensor
 import torch.nn.functional as F
 from fairseq import checkpoint_utils, utils
 from fairseq.data.data_utils import lengths_to_padding_mask
@@ -250,6 +252,7 @@ class BerardEncoder(FairseqEncoder):
         else:
             self.dropout = None
 
+
     def forward(self, src_tokens, src_lengths=None, **kwargs):
         """
         Args
@@ -311,6 +314,7 @@ class BerardEncoder(FairseqEncoder):
             "encoder_padding_mask"
         ].index_select(1, new_order)
         return encoder_out
+
 
 
 class MLPAttention(nn.Module):
@@ -434,6 +438,43 @@ class LSTMDecoder(FairseqIncrementalDecoder):
             hidden_size + encoder_output_dim + embed_dim, output_layer_dim
         )
         self.output_projection = nn.Linear(output_layer_dim, num_embeddings)
+
+    def _prefix_tokens(
+        self, step: int, lprobs, scores, tokens, prefix_tokens, beam_size=1
+    ):
+        """Handle prefix tokens"""
+        prefix_toks = prefix_tokens[:, step].unsqueeze(-1).repeat(1, beam_size).view(-1)
+        prefix_lprobs = lprobs.gather(-1, prefix_toks.unsqueeze(-1))
+        prefix_mask = prefix_toks.ne(self.pad)
+        lprobs[prefix_mask] = torch.tensor(-math.inf).to(lprobs)
+        lprobs[prefix_mask] = lprobs[prefix_mask].scatter(
+            -1, prefix_toks[prefix_mask].unsqueeze(-1), prefix_lprobs[prefix_mask]
+        )
+        # if prefix includes eos, then we should make sure tokens and
+        # scores are the same across all beams
+        eos_mask = prefix_toks.eq(self.eos)
+        if eos_mask.any():
+            # validate that the first beam matches the prefix
+            first_beam = tokens[eos_mask].view(-1, beam_size, tokens.size(-1))[
+                :, 0, 1 : step + 1
+            ]
+            eos_mask_batch_dim = eos_mask.view(-1, 1)[:, 0]
+            target_prefix = prefix_tokens[eos_mask_batch_dim][:, :step]
+            assert (first_beam == target_prefix).all()
+
+            # copy tokens, scores and lprobs from the first beam to all beams
+            tokens = self.replicate_first_beam(tokens, eos_mask_batch_dim, beam_size)
+            scores = self.replicate_first_beam(scores, eos_mask_batch_dim, beam_size)
+            lprobs = self.replicate_first_beam(lprobs, eos_mask_batch_dim, beam_size)
+        return lprobs, tokens, scores
+
+    def replicate_first_beam(self, tensor, mask, beam_size: int):
+        tensor = tensor.view(-1, beam_size, tensor.size(-1))
+        tensor[mask] = tensor[mask][:, :1, :]
+        return tensor.view(-1, tensor.size(-1))
+
+
+
 
     def forward(
         self, prev_output_tokens, encoder_out=None, incremental_state=None, **kwargs
