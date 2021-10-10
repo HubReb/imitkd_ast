@@ -62,7 +62,15 @@ class ImitKDTConfig(FairseqDataclass):
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
         metadata={"help": "models's bpe codes"},
     )
-
+    model_vocab_src: str = field(
+        default="/scratch/hubert/knn_ast_kd_nmt/fairseq/examples/translation/data-bin/MUST_source/dict.en.txt",
+        metadata={"help": "vocab file for ast model input"},
+    )
+     model_vocab_tgt: str = field(
+        default="/scratch/hubert/knn_ast_kd_nmt/fairseq/examples/translation/data-bin/MUST_source/dict.de.txt",
+        metadata={"help": "vocab file for ast model output"},
+    )
+ 
 
 
 def valid_loss(lprobs, target, ignore_prefix_size, ignore_index=None, reduce=True):
@@ -180,6 +188,8 @@ class ImitKD(FairseqCriterion):
         beta,
         bpe_codes,
         bpe_codes_model,
+        model_vocab_src,
+        model_vocab_tgt,
         ignore_prefix_size=0,
         report_accuracy=False,
     ):
@@ -190,7 +200,7 @@ class ImitKD(FairseqCriterion):
         self.expert = self.expert[-1]
         self.expert_vocab_src = Dictionary.load(expert_vocab_src)
         self.expert_vocab_tgt = Dictionary.load(expert_vocab_tgt)
-        self.model_src_dict = Dictionary.load("/scratch/hubert/knn_ast_kd_nmt/fairseq/examples/translation/data-bin/MUST_source/dict.en.txt")
+        self.model_src_dict = Dictionary.load(model_vocab_src)
         self.expert.requires_grad = False
         self.dict = task.tgt_dict
         self.eos = self.dict.eos()
@@ -198,7 +208,7 @@ class ImitKD(FairseqCriterion):
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
         self.beta = beta
-        self.sp_model = fastBPE.fastBPE(bpe_codes_model, "/scratch/hubert/knn_ast_kd_nmt/fairseq/examples/translation/data-bin/MUST_source/dict.de.txt")
+        self.sp_model = fastBPE.fastBPE(bpe_codes_model, model_vocab_tgt)
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
