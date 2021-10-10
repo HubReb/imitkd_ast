@@ -10,6 +10,7 @@ import sentencepiece as spm
 import fastBPE
 
 import torch
+from torch.distributions import Categorical
 from numpy.random import uniform
 
 from omegaconf import II
@@ -116,10 +117,10 @@ def imit_kd_loss(
             "nsentences": generated_dataset["nsentences"],
             }
     with torch.no_grad():
-        expert_out = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=True).detach()
-        expert_preds = expert_out.argmax(-1)
+        expert_logits = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=True).detach()
+        expert_preds = expert_logits.argmax(-1)
+        """
         for i, t in enumerate(expert_preds):
-            """
             print(i)
             print("student input :" , expert_vocab_tgt.string(expert_vocab_tgt.encode_line(encoded_prevs[i], add_if_not_exist=False, append_eos=True), bpe_symbol='fastBPE', escape_unk=True))
             print("expert prediction: ", expert_vocab_tgt.string(
@@ -134,7 +135,7 @@ def imit_kd_loss(
             )
             )
             print("target: ", model_dict.string(generated_dataset["target"][i], bpe_symbol='sentencepiece', escape_unk=True))
-            """
+        """
         expert_preds_in_model_vocab = [
                 model_dict.encode_line(
                     " ".join(sp_model.EncodeAsPieces(
@@ -270,10 +271,10 @@ class ImitKD(FairseqCriterion):
             hypos = student_generator._generate(sample)
             targets = sample["net_input"]["prev_output_tokens"].data.tolist()
             max_length = max([len(i) for i in targets])     # let's avoid blowing up the GPU RAM, shall we?
+            dist = Categorical(torch.tensor([self.beta, 1-self.beta]))
+            samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
             for i, hypo in enumerate(hypos):
-                u = uniform(low=0.0, high=1.0, size=None)
-                if u > self.beta:
-                    # print(i, "is student prediction!")
+                if samp_mask[i]:
                     targets[i] = hypo[0]["tokens"][:max_length].clone().detach()
                 else:
                     targets[i] = torch.tensor(targets[i]).clone().detach()

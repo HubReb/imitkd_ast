@@ -11,6 +11,7 @@ import fastBPE
 
 import torch
 from numpy.random import uniform
+from torch.distributions import Categorical
 
 from fairseq import metrics, utils
 from fairseq.scoring import bleu
@@ -118,8 +119,8 @@ def imit_kd_loss(
     with torch.no_grad():
         expert_out = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=True).detach()
         expert_preds = expert_out.argmax(-1)
+        """
         for i, t in enumerate(expert_preds):
-            """
             print(i)
             print("student input :" , encoded_prevs[i])
             e = expert_vocab_tgt.string(
@@ -133,7 +134,7 @@ def imit_kd_loss(
                 )
             )
             print("target: ", model_dict.string(generated_dataset["target"][i], bpe_symbol='fastBPE', escape_unk=True))
-            """
+        """
         expert_preds_in_model_vocab = [
                 model_dict.encode_line(
                     sp_model.apply([
@@ -189,7 +190,7 @@ class ImitKD(FairseqCriterion):
         self.expert = self.expert[-1]
         self.expert_vocab_src = Dictionary.load(expert_vocab_src)
         self.expert_vocab_tgt = Dictionary.load(expert_vocab_tgt)
-        self.model_src_dict = Dictionary.load("data-bin/iwslt14.tokenized.en-de/dict.en.txt")
+        self.model_src_dict = Dictionary.load("/scratch/hubert/knn_ast_kd_nmt/fairseq/examples/translation/data-bin/MUST_source/dict.en.txt")
         self.expert.requires_grad = False
         self.dict = task.tgt_dict
         self.eos = self.dict.eos()
@@ -197,7 +198,7 @@ class ImitKD(FairseqCriterion):
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
         self.beta = beta
-        self.sp_model = fastBPE.fastBPE(bpe_codes_model, "data-bin/iwslt14.tokenized.en-de/dict.de.txt")
+        self.sp_model = fastBPE.fastBPE(bpe_codes_model, "/scratch/hubert/knn_ast_kd_nmt/fairseq/examples/translation/data-bin/MUST_source/dict.de.txt")
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
@@ -267,11 +268,11 @@ class ImitKD(FairseqCriterion):
             hypos = student_generator._generate(sample)
             targets = sample["net_input"]["prev_output_tokens"].data.tolist()
             max_length = max([len(i) for i in targets])     # let's avoid blowing up the GPU RAM, shall we?
-            for i in range(len(hypos)):
-                u = uniform(low=0.0, high=1.0, size=None)
-                if u > self.beta:
-                    # print(i, "is student prediction!")
-                    targets[i] = hypos[i][0]["tokens"][:max_length].clone().detach()
+            dist = Categorical(torch.tensor([self.beta, 1-self.beta]))
+            samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
+            for i, hypo in enumerate(hypos):
+                if samp_mask[i]:
+                    targets[i] = hypo[0]["tokens"][:max_length].clone().detach()
                 else:
                     targets[i] = torch.tensor(targets[i]).clone().detach()
             sample["net_input"]["prev_output_tokens"] = collate_tokens(
@@ -336,13 +337,14 @@ class ImitKD(FairseqCriterion):
     def transform_source_tokens_into_expert_voc(self, sample):
         source_text = sample["net_input"]["src_tokens"]
         source_texts = []
-        for line in source_text:
+        target_text = sample["target"]
+        for i, line in enumerate(source_text):
             if type(line) == list:
                 for text in line:
                     source_texts.append(
                         self.expert_vocab_src.encode_line(
                             self.bpe.apply([
-                                self.model_src_dictsrc.string(
+                                self.model_src_dict.string(
                                     utils.strip_pad(t, self.dict.pad()), bpe_symbol='fastBPE', escape_unk=True)])[0],
                             add_if_not_exist=False, append_eos=True)
                     )
