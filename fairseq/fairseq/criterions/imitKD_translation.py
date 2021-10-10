@@ -66,11 +66,11 @@ class ImitKDTConfig(FairseqDataclass):
         default="/scratch/hubert/knn_ast_kd_nmt/fairseq/examples/translation/data-bin/MUST_source/dict.en.txt",
         metadata={"help": "vocab file for ast model input"},
     )
-     model_vocab_tgt: str = field(
+    model_vocab_tgt: str = field(
         default="/scratch/hubert/knn_ast_kd_nmt/fairseq/examples/translation/data-bin/MUST_source/dict.de.txt",
         metadata={"help": "vocab file for ast model output"},
     )
- 
+
 
 
 def valid_loss(lprobs, target, ignore_prefix_size, ignore_index=None, reduce=True):
