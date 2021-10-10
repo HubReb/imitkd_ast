@@ -384,10 +384,16 @@ def post_process(sentence: str, symbol: str):
             symbol = "@@ "
         sentence = (sentence + " ").replace(symbol, "").rstrip()
     elif symbol == "fastBPE":
-        sentence = sentence.replace("@@ ", "").strip()
-        sentence = sentence.replace("@@", "").strip()
-        sentence = sentence.replace(" @-@ ", "-").strip()
-
+        sentence = sentence.replace("@@ ", "")
+        sentence = sentence.replace("@@", "")
+        sentence = sentence.replace(" @-@ ", "-")
+        sentence = sentence.replace(" @-@", "-").strip()
+    elif symbol == "sentencepiece_fastBPE":
+        sentence = sentence.replace(" ", "").replace("\u2581", " ")
+        sentence = sentence.replace(" @-@ ", "-")
+        sentence = sentence.replace("@@ ", "")
+        sentence = sentence.replace("@@", "")
+        sentence = sentence.replace(" @-@", "-").strip()
     elif symbol == "none":
         pass
     elif symbol is not None:

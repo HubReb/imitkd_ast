@@ -92,7 +92,7 @@ def imit_kd_loss(
         ):
     encoded_prevs = []
     for s in generated_dataset["net_input"]["prev_output_tokens"]:
-        encoded_prevs.append(model_dict.string(utils.strip_pad(s, model_dict.pad()), bpe_symbol='sentencepiece', escape_unk=True))
+        encoded_prevs.append(model_dict.string(utils.strip_pad(s, model_dict.pad()), bpe_symbol='sentencepiece_fastBPE', escape_unk=True))
     encoded_prevs = bpe.apply(encoded_prevs)
     sample_expert = {
             "id": generated_dataset["id"],
@@ -127,14 +127,7 @@ def imit_kd_loss(
                         utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True
                     )
             )
-            print(" ".join(sp_model.EncodeAsPieces(
-                    expert_vocab_tgt.string(
-                        utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True
-                    )
-                )
-            )
-            )
-            print("target: ", model_dict.string(generated_dataset["target"][i], bpe_symbol='sentencepiece', escape_unk=True))
+            print("target: ", model_dict.string(utils.strip_pad(generated_dataset["target"][i], model_dict.pad()), bpe_symbol='sentencepiece_fastBPE', escape_unk=True))
         """
         expert_preds_in_model_vocab = [
                 model_dict.encode_line(
