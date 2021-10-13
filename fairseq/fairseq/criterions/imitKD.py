@@ -335,9 +335,17 @@ class ImitKD(FairseqCriterion):
         for line in source_text:
             if isinstance(line, list):
                 for text in line:
-                    source_texts.append(self.expert_vocab_src.encode_line(text, add_if_not_exist=False, append_eos=True))
+                    source_texts.append(self.expert_vocab_src.encode_line(
+                        self.bpe.apply([text])[0],
+                        add_if_not_exist=False,
+                        append_eos=True)
+                    )
             else:
-                source_texts.append(self.expert_vocab_src.encode_line(line, add_if_not_exist=False, append_eos=True))
+                source_texts.append(self.expert_vocab_src.encode_line(
+                    self.bpe.apply([line])[0],
+                    add_if_not_exist=False,
+                    append_eos=True)
+                )
         source_text = collate_tokens(
             source_texts,
             self.expert_vocab_src.pad(),
