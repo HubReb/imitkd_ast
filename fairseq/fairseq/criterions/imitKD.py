@@ -341,7 +341,7 @@ class ImitKD(FairseqCriterion):
         for line in source_text:
             if isinstance(line, list):
                 for text in line:
-                    if self.covost:
+                    if not self.covost:
                         text = self.bpe.apply([text])[0]
                     source_texts.append(self.expert_vocab_src.encode_line(
                         text,
@@ -349,7 +349,7 @@ class ImitKD(FairseqCriterion):
                         append_eos=True)
                     )
             else:
-                if self.covost:
+                if not self.covost:
                     line = self.bpe.apply([line])[0]
                 source_texts.append(self.expert_vocab_src.encode_line(
                     line,
