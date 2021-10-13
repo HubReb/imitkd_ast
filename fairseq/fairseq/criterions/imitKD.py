@@ -63,10 +63,6 @@ class ImitKDConfig(FairseqDataclass):
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
         metadata={"help": "expert's bpe codes"},
     )
-    covost: bool = field(
-        default=False,
-        metadata={"help": "whether covost dataset is used"},
-    )
 
 
 def valid_loss(lprobs, target, ignore_prefix_size, ignore_index=None, reduce=True):
@@ -179,7 +175,6 @@ class ImitKD(FairseqCriterion):
         beta,
         sp_model,
         bpe_codes,
-        covost,
         ignore_prefix_size=0,
         report_accuracy=False,
     ):
@@ -200,7 +195,6 @@ class ImitKD(FairseqCriterion):
         self.sp_model = spm.SentencePieceProcessor()
         self.sp_model.Load(sp_model)
         self.sp_model.requires_grad = False
-        self.covost = covost
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
@@ -341,18 +335,14 @@ class ImitKD(FairseqCriterion):
         for line in source_text:
             if isinstance(line, list):
                 for text in line:
-                    if not self.covost:
-                        text = self.bpe.apply([text])[0]
                     source_texts.append(self.expert_vocab_src.encode_line(
-                        text,
+                        self.bpe.apply([text])[0],
                         add_if_not_exist=False,
                         append_eos=True)
                     )
             else:
-                if not self.covost:
-                    line = self.bpe.apply([line])[0]
                 source_texts.append(self.expert_vocab_src.encode_line(
-                    line,
+                    self.bpe.apply([line])[0],
                     add_if_not_exist=False,
                     append_eos=True)
                 )
