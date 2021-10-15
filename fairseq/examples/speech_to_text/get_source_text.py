@@ -44,9 +44,11 @@ def add_tokenized_text_to_target(filename, tokenized_text, result_filename, colu
     df.to_csv(result_filename, sep="\t")
 
 
-def get_source_text_old_fashioned(filename, column_name="tgt_txt"):
+def get_source_text_old_fashioned(filename, column_name="tgt_txt", column_number=6):
     if column_name == "tgt_txt":
         index = 4
+        if column_number != 6:
+            index = 5
     elif column_name == "src_txt":
         index = -1
     else:
@@ -61,7 +63,7 @@ def add_tokenized_text_to_target_old_fashioned(filename, tokenized_text, result_
     with open(filename) as f:
         data = f.read().split("\n")[:-1]
     if column_name == "tgt_txt":
-        new_csv = ["\t".join(data[0].split("\t")[:3] + data[0].split("\t")[3:])]
+        new_csv = [data[0]]
     elif column_name == "src_txt":
         new_csv = [data[0]]
     else:
@@ -104,15 +106,19 @@ def get_text_from_datasets():
     save_text_in_file("covost/dev_text.txt", target_text)
     target_text = get_column_text("covost/en/test_st_en_de_with_source_text.tsv")
     save_text_in_file("covost/test_text.txt", target_text)
+    target_text = get_column_text("covost/en/dev_st_en_de_with_source_text.tsv", column_name="src_txt")
+    save_text_in_file("covost/dev_text_en.txt", target_text)
+    target_text = get_column_text("covost/en/test_st_en_de_with_source_text.tsv", column_name="src_txt")
+    save_text_in_file("covost/test_text_en.txt", target_text)
     target_text = get_source_text_old_fashioned("mustc_csvs/train_st_with_source_text.tsv")
     save_text_in_file("mustc_processed/train_text.txt", target_text)
-    target_text = get_source_text_old_fashioned("mustc_csvs/dev_st_with_source_text.tsv", column_name="src_txt")
+    target_text = get_source_text_old_fashioned("mustc_csvs/dev_st_with_source_text.tsv", column_number=5)
     save_text_in_file("mustc_processed/dev_text.txt", target_text)
-    target_text = get_column_text("mustc_csvs/tst-COMMON_st_with_source_text.tsv", column_name="src_txt")
+    target_text = get_column_text("mustc_csvs/tst-COMMON_st_with_source_text.tsv")
     save_text_in_file("mustc_processed/test_text.txt", target_text)
     target_text = get_column_text("libri_csv/train_libri_pseudo_labeled.tsv", column_name="src_txt")
     save_text_in_file("libri_processed/train_text.txt", target_text)
-    target_text = get_source_text_old_fashioned("mustc_processed/train_processed.tsv", column_name="src_txt")
+    target_text = get_source_text_old_fashioned("mustc_csvs/train_st_with_source_text_normal.tsv", column_name="src_txt")
     save_text_in_file("mustc_processed/train_text_en.txt", target_text)
     target_text = get_column_text("mustc_processed/dev_processed.tsv", column_name="src_txt")
     save_text_in_file("mustc_processed/dev_text_en.txt", target_text)
@@ -131,29 +137,30 @@ def create_processed_datasets():
     tokenized_training_text = get_tokenized_text("covost_processed_text/train.tok.en")
     add_tokenized_text_to_target("covost/en/train_processed.tsv", tokenized_training_text,
                                  "covost/en/train_processed.tsv", column_name="src_txt")
-
     tokenized_dev_text = get_tokenized_text("covost_processed_text/dev.tok.de")
     add_tokenized_text_to_target('covost/en/dev_st_en_de_with_source_text.tsv', tokenized_dev_text,
                                  'covost/en/dev_processed.tsv')
+    tokenized_dev_text = get_tokenized_text("covost_processed_text/dev.tok.en")
+    add_tokenized_text_to_target('covost/en/dev_processed.tsv', tokenized_dev_text,
+                                 'covost/en/dev_processed.tsv', column_name="src_txt")
     tokenized_test_text = get_tokenized_text('covost_processed_text/test.tok.de')
     add_tokenized_text_to_target('covost/en/test_st_en_de_with_source_text.tsv', tokenized_test_text,
                                  'covost/en/test_processed.tsv')
+    tokenized_test_text = get_tokenized_text('covost_processed_text/test.tok.en')
+    add_tokenized_text_to_target('covost/en/test_processed.tsv', tokenized_test_text,
+                                 'covost/en/test_processed.tsv', column_name="src_txt")
     gen_vocab(Path("mustc_processed_text/train.tok.de"), Path("MUST/en-de/spm_bpe8000_ast"), "bpe", 8000)
     tokenized_training_text = get_tokenized_text("mustc_processed_text/train.tok.de")
-    add_tokenized_text_to_target_old_fashioned_train("train_st_with_source_text.tsv", tokenized_training_text,
+    add_tokenized_text_to_target_old_fashioned_train("mustc_csvs/train_st_with_source_text.tsv", tokenized_training_text,
                                                      "mustc_processed/train_processed.tsv")
-    tokenized_training_text = get_tokenized_text("mustc_processed_text/train.tok.de")
-    add_tokenized_text_to_target_old_fashioned("train_st_with_source_text.tsv", tokenized_training_text,
-                                               "mustc_processed/train_processed.tsv")
-
     tokenized_dev_text = get_tokenized_text("mustc_processed_text/dev.tok.de")
-    add_tokenized_text_to_target_old_fashioned("dev_st_with_source_text.tsv", tokenized_dev_text,
+    add_tokenized_text_to_target_old_fashioned("mustc_csvs/dev_st_with_source_text.tsv", tokenized_dev_text,
                                                "mustc_processed/dev_processed.tsv")
     tokenized_test_text = get_tokenized_text("mustc_processed_text/test.tok.de")
-    add_tokenized_text_to_target_old_fashioned("tst-COMMON_st_with_source_text.tsv", tokenized_test_text,
+    add_tokenized_text_to_target_old_fashioned("mustc_csvs/tst-COMMON_st_with_source_text.tsv", tokenized_test_text,
                                                "mustc_processed/tst-COMMON_processed.tsv")
     tokenized_libri_text = get_tokenized_text('libri_processed_text/train.tok.de')
-    add_tokenized_text_to_target('train_libri_pseudo_labeled.tsv', tokenized_libri_text,
+    add_tokenized_text_to_target('libri_csv/train_libri_pseudo_labeled.tsv', tokenized_libri_text,
                                  'train_libri_processed.tsv')
     tokenized_training_text = get_tokenized_text("mustc_processed_text/train.tok.en")
     add_tokenized_text_to_target_old_fashioned("mustc_processed/train_processed.tsv", tokenized_training_text,
