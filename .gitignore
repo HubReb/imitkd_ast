@@ -13,3 +13,4 @@ fastBPE/
 *.pt
 *.en
 *.de
+.idea*
