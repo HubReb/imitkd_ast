@@ -11,9 +11,6 @@ import fastBPE
 
 import torch
 from torch.distributions import Categorical
-from numpy.random import uniform
-
-from omegaconf import II
 
 from fairseq import metrics, utils
 from fairseq.criterions import FairseqCriterion, register_criterion
@@ -41,7 +38,7 @@ class ImitKDConfig(FairseqDataclass):
         default=1,
         metadata={"help": "replacement prop"},
     )
- 
+
     expert_vocab_tgt: str = field(
         default="wmt19.en-de.joined-dict.ensemble/dict.de.txt",
         metadata={"help": "vocab for nmt model output"},
@@ -55,7 +52,8 @@ class ImitKDConfig(FairseqDataclass):
         metadata={"help": "directory with expert's dictionaries"},
     )
     sp_model: str = field(
-        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/covost/en/spm_bpe8000_st_en_de.model",
+        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/covost/en"
+                "/spm_bpe8000_st_en_de.model",
         metadata={"help": "student's sentencepiece model"},
     )
 
@@ -65,7 +63,7 @@ class ImitKDConfig(FairseqDataclass):
     )
 
 
-def valid_loss(lprobs, target, ignore_prefix_size, ignore_index=None, reduce=True):
+def valid_loss(lprobs, target, ignore_index=None, reduce=True):
     if target.dim() == lprobs.dim() - 1:
         target = target.unsqueeze(-1)
     nll_loss = -lprobs.gather(dim=-1, index=target)
@@ -80,108 +78,120 @@ def valid_loss(lprobs, target, ignore_prefix_size, ignore_index=None, reduce=Tru
 
 
 def imit_kd_loss(
-    generated_dataset,
-    model,
-    expert,
-    source_text,
-    model_dict,
-    expert_vocab_tgt,
-    sp_model,
-    bpe,
-    ignore_index,
-    source_lengths
-        ):
+        generated_dataset,
+        model,
+        expert,
+        source_text,
+        model_dict,
+        expert_vocab_tgt,
+        sp_model,
+        bpe,
+        ignore_index,
+        source_lengths
+):
     encoded_prevs = []
-    encoded_targets = []
     for s in generated_dataset["net_input"]["prev_output_tokens"]:
-        encoded_prevs.append(model_dict.string(utils.strip_pad(s, model_dict.pad()), bpe_symbol='sentencepiece_fastBPE', escape_unk=True, include_eos=False))
+        encoded_prevs.append(model_dict.string(utils.strip_pad(s, model_dict.pad()),
+                                               bpe_symbol='sentencepiece_fastBPE',
+                                               escape_unk=True,
+                                               include_eos=False
+                                               )
+                             )
     encoded_prevs = bpe.apply(encoded_prevs)
     sample_expert = {
-            "id": generated_dataset["id"],
-            "net_input": {
-                "src_tokens": source_text.cuda(),
-                "src_lengths": source_lengths,
-                "prev_output_tokens": collate_tokens(
-                    [
-                        expert_vocab_tgt.encode_line(
-                            t, add_if_not_exist=False, append_eos=True
-                        ) for t in encoded_prevs
-                    ],
-                    expert_vocab_tgt.pad(),
-                    expert_vocab_tgt.eos(),
-                    left_pad=False,
-                    move_eos_to_beginning=True,
-                    ).cuda()
-            },
-            "target": generated_dataset["target"],
-            "target_lengths": generated_dataset["target_lengths"],
-            "ntokens": generated_dataset["ntokens"],
-            "nsentences": generated_dataset["nsentences"],
-            }
+        "id": generated_dataset["id"],
+        "net_input": {
+            "src_tokens": source_text.cuda(),
+            "src_lengths": source_lengths,
+            "prev_output_tokens": collate_tokens(
+                [
+                    expert_vocab_tgt.encode_line(
+                        t, add_if_not_exist=False, append_eos=True
+                    ) for t in encoded_prevs
+                ],
+                expert_vocab_tgt.pad(),
+                expert_vocab_tgt.eos(),
+                left_pad=False,
+                move_eos_to_beginning=True,
+            ).cuda()
+        },
+        "target": generated_dataset["target"],
+        "target_lengths": generated_dataset["target_lengths"],
+        "ntokens": generated_dataset["ntokens"],
+        "nsentences": generated_dataset["nsentences"],
+    }
     with torch.no_grad():
         expert_logits = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=True).detach()
         expert_preds = expert_logits.argmax(-1)
-        """
+
         for i, t in enumerate(expert_preds):
             print(i)
             print(expert_vocab_tgt.encode_line(encoded_prevs[i], add_if_not_exist=False, append_eos=True))
-            print("student input :" , expert_vocab_tgt.string(expert_vocab_tgt.encode_line(encoded_prevs[i], add_if_not_exist=False, append_eos=True), bpe_symbol='fastBPE', escape_unk=True, include_eos=True))
+            print("student input :",
+                  expert_vocab_tgt.string(
+                      expert_vocab_tgt.encode_line(encoded_prevs[i], add_if_not_exist=False, append_eos=True),
+                      bpe_symbol='fastBPE',
+                      escape_unk=True,
+                      include_eos=True
+                  )
+                  )
             print("expert prediction: ", expert_vocab_tgt.string(
-                        utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True, include_eos=True
-                    )
+                utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True, include_eos=True
             )
+                  )
             print(utils.strip_pad(t, expert_vocab_tgt.pad()))
-            print("target: ", model_dict.string(utils.strip_pad(generated_dataset["target"][i], model_dict.pad()), bpe_symbol='sentencepiece_fastBPE', escape_unk=True, include_eos=True))
+            print("target: ", model_dict.string(utils.strip_pad(generated_dataset["target"][i], model_dict.pad()),
+                                                bpe_symbol='sentencepiece_fastBPE', escape_unk=True, include_eos=True))
             ep = expert_vocab_tgt.string(
                 utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True, include_eos=True
             ).split("</s>")[0]
             print(" ".join(sp_model.EncodeAsPieces(ep)))
             print(model_dict.eos())
             print(model_dict.encode_line(
-                    " ".join(sp_model.EncodeAsPieces(ep)),
-                    add_if_not_exist=False,
-                    append_eos=True)
+                " ".join(sp_model.EncodeAsPieces(ep)),
+                add_if_not_exist=False,
+                append_eos=True)
             )
             print(model_dict.string(
                 model_dict.encode_line(
                     " ".join(sp_model.EncodeAsPieces(ep)),
                     add_if_not_exist=False,
                     append_eos=True)
-                )
             )
-        """
+            )
 
         expert_preds_in_model_vocab = [
-                model_dict.encode_line(
-                    " ".join(sp_model.EncodeAsPieces(
-                            expert_vocab_tgt.string(
-                                utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True, include_eos=True
-                            ).split("</s>")[0]
-                        )
-                    ),
-                    add_if_not_exist=False,
-                    append_eos=True)
-                for t in expert_preds
+            model_dict.encode_line(
+                " ".join(sp_model.EncodeAsPieces(
+                    expert_vocab_tgt.string(
+                        utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True,
+                        include_eos=True
+                    ).split("</s>")[0]
+                )
+                ),
+                add_if_not_exist=False,
+                append_eos=True)
+            for t in expert_preds
         ]
         preds = collate_tokens(
-                expert_preds_in_model_vocab,
-                model_dict.pad(),
-                model_dict.eos(),
-                left_pad=False,
-                move_eos_to_beginning=False
+            expert_preds_in_model_vocab,
+            model_dict.pad(),
+            model_dict.eos(),
+            left_pad=False,
+            move_eos_to_beginning=False
         )
         preds = preds.to(torch.int64).cuda()
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
-    if preds.dim() == lprobs.dim() -1:
+    if preds.dim() == lprobs.dim() - 1:
         preds = preds.unsqueeze(-1)
     if preds.shape[1] > lprobs.shape[1]:
         preds = preds[:, :lprobs.shape[1], :]
-    imit_kd_loss = -lprobs.gather(dim=-1, index=preds)
+    imit_kd_loss_for_sample = -lprobs.gather(dim=-1, index=preds)
     if ignore_index is not None:
         pad_mask = preds.eq(ignore_index)
-        imit_kd_loss.masked_fill_(pad_mask, 0.0)
-    imit_kd_loss = imit_kd_loss.sum()
-    return imit_kd_loss
+        imit_kd_loss_for_sample.masked_fill_(pad_mask, 0.0)
+    imit_kd_loss_for_sample = imit_kd_loss_for_sample.sum()
+    return imit_kd_loss_for_sample
 
 
 @register_criterion(
@@ -189,17 +199,17 @@ def imit_kd_loss(
 )
 class ImitKD(FairseqCriterion):
     def __init__(
-        self,
-        task,
-        expert,
-        expert_vocab_src,
-        expert_vocab_tgt,
-        path,
-        beta,
-        sp_model,
-        bpe_codes,
-        ignore_prefix_size=0,
-        report_accuracy=False,
+            self,
+            task,
+            expert,
+            expert_vocab_src,
+            expert_vocab_tgt,
+            path,
+            beta,
+            sp_model,
+            bpe_codes,
+            ignore_prefix_size=0,
+            report_accuracy=False,
     ):
         super().__init__(task)
         self.ignore_prefix_size = ignore_prefix_size
@@ -233,7 +243,7 @@ class ImitKD(FairseqCriterion):
             sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
         )
         logging_output = {
-            "loss" : loss.data,
+            "loss": loss.data,
             "ntokens": sample["ntokens"],
             "nsentences": sample["target"].size(0),
             "sample_size": sample_size,
@@ -249,17 +259,17 @@ class ImitKD(FairseqCriterion):
         target = model.get_targets(sample, net_output)
         if self.ignore_prefix_size > 0:
             if getattr(lprobs, "batch_first", False):
-                lprobs = lprobs[:, self.ignore_prefix_size :, :].contiguous()
-                target = target[:, self.ignore_prefix_size :].contiguous()
+                lprobs = lprobs[:, self.ignore_prefix_size:, :].contiguous()
+                target = target[:, self.ignore_prefix_size:].contiguous()
             else:
-                lprobs = lprobs[self.ignore_prefix_size :, :, :].contiguous()
-                target = target[self.ignore_prefix_size :, :].contiguous()
+                lprobs = lprobs[self.ignore_prefix_size:, :, :].contiguous()
+                target = target[self.ignore_prefix_size:, :].contiguous()
         return lprobs, target
 
     def compute_loss(self, model, net_output, sample, reduce=True, valid=False):
         if valid:
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
-            loss = valid_loss(lprobs, target, self.ignore_prefix_size, self.padding_idx, reduce=reduce)
+            loss = valid_loss(lprobs, target, self.padding_idx, reduce=reduce)
         else:
             source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
             generated_dataset = self.generate_imit_batch(model, sample)
@@ -277,9 +287,6 @@ class ImitKD(FairseqCriterion):
             )
         return loss
 
-
-
-
     def generate_imit_batch(self, student, sample):
         with torch.no_grad():
             student = student.eval()
@@ -287,8 +294,8 @@ class ImitKD(FairseqCriterion):
             student_generator.cuda()
             hypos = student_generator._generate(sample)
             targets = sample["net_input"]["prev_output_tokens"].data.tolist()
-            max_length = max([len(i) for i in targets])     # let's avoid blowing up the GPU RAM, shall we?
-            dist = Categorical(torch.tensor([self.beta, 1-self.beta]))
+            max_length = max([len(i) for i in targets])  # let's avoid blowing up the GPU RAM, shall we?
+            dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
             samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
             for i, hypo in enumerate(hypos):
                 if samp_mask[i]:
@@ -296,13 +303,13 @@ class ImitKD(FairseqCriterion):
                 else:
                     targets[i] = torch.tensor(targets[i]).clone().detach()
             sample["net_input"]["prev_output_tokens"] = collate_tokens(
-                    targets,
-                    self.dict.pad(),
-                    self.dict.eos(),
-                    left_pad=False,
-                    move_eos_to_beginning=False
-                    ).detach().cuda()
-            student = student.train()
+                targets,
+                self.dict.pad(),
+                self.dict.eos(),
+                left_pad=False,
+                move_eos_to_beginning=False
+            ).detach().cuda()
+            student.train()
         return sample
 
     def compute_accuracy(self, model, net_output, sample):
@@ -351,8 +358,6 @@ class ImitKD(FairseqCriterion):
         """
         return True
 
-
-
     def transform_source_tokens_into_expert_voc(self, sample):
         source_text = sample["net_input"]["src_text"]
         source_texts = []
@@ -396,7 +401,7 @@ def collate_tokens(values, pad_idx, eos, left_pad, move_eos_to_beginning):
 
     for i, v in enumerate(values):
         if left_pad:
-            copy_tensor(v, res[i][size-len(v):])
+            copy_tensor(v, res[i][size - len(v):])
         else:
             copy_tensor(v, res[i][:len(v)])
     return res
