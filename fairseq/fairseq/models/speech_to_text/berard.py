@@ -121,6 +121,13 @@ class BerardModel(FairseqEncoderDecoderModel):
             metavar="STR",
             help="model to take decoder weights from (for initialization)",
         )
+        parser.add_argument(
+            '--encoder-freezing-updates',
+            type=int,
+            metavar='N',
+            help='freeze encoder for first N updates'
+        )
+
 
     @classmethod
     def build_encoder(cls, args, task):
@@ -137,6 +144,8 @@ class BerardModel(FairseqEncoderDecoderModel):
             encoder = checkpoint_utils.load_pretrained_component_from_model(
                 component=encoder, checkpoint=args.load_pretrained_encoder_from
             )
+        encoder.encoder_freezing_updates = args.encoder_freezing_updates
+
         return encoder
 
     @classmethod
@@ -202,7 +211,7 @@ class BerardEncoder(FairseqEncoder):
                 layers.
         """
         super().__init__(None)
-
+        self.num_updates = 0
         self.input_layers = nn.ModuleList()
         in_features = input_feat_per_channel
         for out_features in input_layers:
@@ -254,6 +263,20 @@ class BerardEncoder(FairseqEncoder):
 
 
     def forward(self, src_tokens, src_lengths=None, **kwargs):
+        if self.num_updates < self.encoder_freezing_updates:
+            with torch.no_grad():
+                x = self._forward(src_tokens, src_lengths, **kwargs)
+        else:
+            x = self._forward(src_tokens, src_lengths, **kwargs)
+        return x
+
+
+    def set_num_updates(self, num_updates):
+        super().set_num_updates(num_updates)
+        self.num_updates = num_updates
+
+
+    def _forward(self, src_tokens, src_lengths=None, **kwargs):
         """
         Args
             src_tokens: padded tensor (B, T, C * feat)
@@ -599,6 +622,7 @@ def berard(args):
     """The original version: "End-to-End Automatic Speech Translation of
     Audiobooks" (https://arxiv.org/abs/1802.04200)
     """
+    args.encoder_freezing_updates = getattr(args, "encoder_freezing_updates", 0)
     args.input_layers = getattr(args, "input_layers", "[256, 128]")
     args.conv_layers = getattr(args, "conv_layers", "[(16, 3, 2), (16, 3, 2)]")
     args.num_blstm_layers = getattr(args, "num_blstm_layers", 3)
