@@ -647,11 +647,7 @@ class Trainer(object):
 
         # task specific setup per epoch
         self.task.begin_epoch(epoch, self.get_model())
-        try:
-            if self.criterion.beta:
-                self.criterion.beta = 0.1**(epoch/20)
-        except AttributeError:
-            pass
+
         if self.tpu:
             import torch_xla.core.xla_model as xm
 
@@ -680,6 +676,12 @@ class Trainer(object):
         # forward and backward pass
         logging_outputs, sample_size, ooms = [], 0, 0
         for i, sample in enumerate(samples):  # delayed update loop
+            try:
+                if self.criterion.beta:
+                    t = self.get_num_updates()
+                    self.criterion.beta = 200 ** (-t / 200000)
+            except AttributeError:
+                pass
             sample, is_dummy_batch = self._prepare_sample(sample)
 
             def maybe_no_sync():

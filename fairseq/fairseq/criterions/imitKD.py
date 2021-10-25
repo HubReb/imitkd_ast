@@ -123,7 +123,7 @@ def imit_kd_loss(
     with torch.no_grad():
         expert_logits = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=True).detach()
         expert_preds = expert_logits.argmax(-1)
-
+        """
         for i, t in enumerate(expert_preds):
             print(i)
             print(expert_vocab_tgt.encode_line(encoded_prevs[i], add_if_not_exist=False, append_eos=True))
@@ -159,7 +159,7 @@ def imit_kd_loss(
                     append_eos=True)
             )
             )
-
+        """
         expert_preds_in_model_vocab = [
             model_dict.encode_line(
                 " ".join(sp_model.EncodeAsPieces(
