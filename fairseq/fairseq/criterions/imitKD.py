@@ -144,17 +144,17 @@ def imit_kd_loss(
                                                 bpe_symbol='sentencepiece_fastBPE', escape_unk=True, include_eos=True))
             ep = expert_vocab_tgt.string(
                 utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True, include_eos=True
-            ).split("</s>")[0]
-            print(" ".join(sp_model.EncodeAsPieces(ep)))
+            )
+            print(" ".join(sp_model.EncodeAsPieces(ep)).replace("< / s >", "</s>").replace("<< unk >>", "<unk>"))
             print(model_dict.eos())
             print(model_dict.encode_line(
-                " ".join(sp_model.EncodeAsPieces(ep)),
+                " ".join(sp_model.EncodeAsPieces(ep)).replace("< / s >", "</s>").replace("<< unk >>", "<unk>"),
                 add_if_not_exist=False,
                 append_eos=True)
             )
             print(model_dict.string(
                 model_dict.encode_line(
-                    " ".join(sp_model.EncodeAsPieces(ep)),
+                    " ".join(sp_model.EncodeAsPieces(ep)).replace("< / s >", "</s>").replace("<< unk >>", "<unk>"),
                     add_if_not_exist=False,
                     append_eos=True)
             )
@@ -166,11 +166,11 @@ def imit_kd_loss(
                     expert_vocab_tgt.string(
                         utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True,
                         include_eos=True
-                    ).split("</s>")[0]
+                    )
                 )
-                ),
+                ).replace("< / s >", "</s>").replace("<< unk >>", "<unk>"),
                 add_if_not_exist=False,
-                append_eos=True)
+                )
             for t in expert_preds
         ]
         preds = collate_tokens(

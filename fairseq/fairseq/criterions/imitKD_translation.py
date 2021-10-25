@@ -129,26 +129,27 @@ def imit_kd_loss(
             print(i)
             print("student input :" , encoded_prevs[i])
             e = expert_vocab_tgt.string(
-                        utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True
+                        utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True, include_eos=True 
                 )
             print("expert prediction: ", e)
+            print(sp_model.apply([e])[0])
             print(model_dict.string(
                     model_dict.encode_line(
-                        sp_model.apply([e])[0], add_if_not_exist=False, append_eos=True
-                    ), bpe_symbol='fastBPE', escape_unk=True
+                        sp_model.apply([e])[0].replace("<@@ /@@ s@@ >", "</s>").replace("<< unk >>", "<unk>"), add_if_not_exist=False, append_eos=True
+                    ), bpe_symbol='fastBPE', escape_unk=True, include_eos=True
                 )
             )
             print("target: ", model_dict.string(generated_dataset["target"][i], bpe_symbol='fastBPE', escape_unk=True))
-        """
+            """
         expert_preds_in_model_vocab = [
             model_dict.encode_line(
                 sp_model.apply([
                     expert_vocab_tgt.string(
-                        utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True
+                        utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True, include_eos=True
                     )]
-                )[0],
+                )[0].replace("<@@ /@@ s@@ >", "</s>").replace("<< unk >>", "<unk>"),
                 add_if_not_exist=False,
-                append_eos=True)
+                )
             for t in expert_preds
         ]
         preds = collate_tokens(
