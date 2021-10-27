@@ -290,7 +290,7 @@ class ImitKD(FairseqCriterion):
     def generate_imit_batch(self, student, sample):
         with torch.no_grad():
             student = student.eval()
-            student_generator = SequenceGenerator([student], self.dict, beam_size=5)
+            student_generator = SequenceGenerator([student], self.dict, beam_size=1)
             student_generator.cuda()
             hypos = student_generator._generate(sample)
             targets = sample["net_input"]["prev_output_tokens"].data.tolist()

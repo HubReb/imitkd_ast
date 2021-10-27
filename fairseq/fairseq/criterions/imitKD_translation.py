@@ -135,12 +135,12 @@ def imit_kd_loss(
             print(sp_model.apply([e])[0])
             print(model_dict.string(
                     model_dict.encode_line(
-                        sp_model.apply([e])[0].replace("<@@ /@@ s@@ >", "</s>").replace("<< unk >>", "<unk>"), add_if_not_exist=False, append_eos=True
+                        sp_model.apply([e])[0].replace("<@@ /@@ s@@ >", "</s>").replace("<< unk >>", "<unk>"), add_if_not_exist=False
                     ), bpe_symbol='fastBPE', escape_unk=True, include_eos=True
                 )
             )
             print("target: ", model_dict.string(generated_dataset["target"][i], bpe_symbol='fastBPE', escape_unk=True))
-            """
+        """
         expert_preds_in_model_vocab = [
             model_dict.encode_line(
                 sp_model.apply([
@@ -170,6 +170,7 @@ def imit_kd_loss(
         pad_mask = preds.eq(ignore_index)
         imit_kd_loss_for_sample.masked_fill_(pad_mask, 0.0)
     imit_kd_loss_for_sample = imit_kd_loss_for_sample.sum()
+    print(imit_kd_loss_for_sample.item())
     return imit_kd_loss_for_sample
 
 
@@ -270,7 +271,7 @@ class ImitKD(FairseqCriterion):
     def generate_imit_batch(self, student, sample):
         with torch.no_grad():
             student = student.eval()
-            student_generator = SequenceGenerator([student], self.dict, beam_size=5)
+            student_generator = SequenceGenerator([student], self.dict, beam_size=1)
             student_generator.cuda()
             hypos = student_generator._generate(sample)
             targets = sample["net_input"]["prev_output_tokens"].data.tolist()
