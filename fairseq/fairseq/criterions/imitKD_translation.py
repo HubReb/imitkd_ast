@@ -170,7 +170,6 @@ def imit_kd_loss(
         pad_mask = preds.eq(ignore_index)
         imit_kd_loss_for_sample.masked_fill_(pad_mask, 0.0)
     imit_kd_loss_for_sample = imit_kd_loss_for_sample.sum()
-    print(imit_kd_loss_for_sample.item())
     return imit_kd_loss_for_sample
 
 

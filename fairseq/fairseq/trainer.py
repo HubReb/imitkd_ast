@@ -676,12 +676,7 @@ class Trainer(object):
         # forward and backward pass
         logging_outputs, sample_size, ooms = [], 0, 0
         for i, sample in enumerate(samples):  # delayed update loop
-            try:
-                if self.criterion.beta:
-                    t = self.get_num_updates()
-                    self.criterion.beta = 200 ** (-t / 200000)
-            except AttributeError:
-                pass
+
             sample, is_dummy_batch = self._prepare_sample(sample)
 
             def maybe_no_sync():
@@ -931,6 +926,13 @@ class Trainer(object):
             )
 
         metrics.log_stop_time("train_wall")
+#.max_epoch, self.cfg.task.warmup_updates)
+        try:
+            if self.criterion.beta:
+                t = self.get_num_updates()
+                self.criterion.beta = 200 ** (-(t / self.cfg.optimization.max_update))
+        except AttributeError:
+            pass
         return logging_output
 
     @metrics.aggregate("valid")
