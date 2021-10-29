@@ -62,7 +62,7 @@ class ImitKDConfig(FairseqDataclass):
         metadata={"help": "expert's bpe codes"},
     )
     data_mix_rate: int = field(
-        default=4,
+        default=1,
         metadata={"help": "number of step to run before updating the model;s parameters"},
     )
 

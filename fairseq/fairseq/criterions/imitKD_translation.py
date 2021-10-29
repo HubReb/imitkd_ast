@@ -67,8 +67,8 @@ class ImitKDTConfig(FairseqDataclass):
         metadata={"help": "vocab file for ast model output"},
     )
     data_mix_rate: int = field(
-        default=4,
-        metadata={"help": "number of step to run before updating the model;s parameters"},
+        default=1,
+        metadata={"help": "number of step to run before updating the model's parameters"},
     )
 
 
