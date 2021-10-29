@@ -669,7 +669,12 @@ class Trainer(object):
         self._set_seed()
         self.model.train()
         self.criterion.train()
-        self.zero_grad()
+        try:
+            # we use Imitation learning KD and don't want to update at every step for speed up
+            if self.get_num_updates() % self.criterion.data_mix_rate == 0:
+                self.zero_grad()
+        except AttributeError:
+            self.zero_grad()
 
         metrics.log_start_time("train_wall", priority=800, round=0)
 
@@ -806,12 +811,20 @@ class Trainer(object):
                 if not torch.isfinite(grad_norm).all():
                     # check local gradnorm single GPU case, trigger NanDetector
                     raise FloatingPointError("gradients are Nan/Inf")
-
-            with torch.autograd.profiler.record_function("optimizer"):
-                # take an optimization step
-                self.task.optimizer_step(
-                    self.optimizer, model=self.model, update_num=self.get_num_updates()
-                )
+            try:
+                # if we use Imitation Learning KD we only update model parameter every x steps
+                if self.get_num_updates() % self.criterion.data_mix_rate == 0:
+                    with torch.autograd.profiler.record_function("optimizer"):
+                        # take an optimization step
+                        self.task.optimizer_step(
+                            self.optimizer, model=self.model, update_num=self.get_num_updates()
+                        )
+            except AttributeError:
+                with torch.autograd.profiler.record_function("optimizer"):
+                    # take an optimization step
+                    self.task.optimizer_step(
+                        self.optimizer, model=self.model, update_num=self.get_num_updates()
+                    )
 
         except FloatingPointError:
             # re-run the forward and backward pass with hooks attached to print
@@ -926,7 +939,6 @@ class Trainer(object):
             )
 
         metrics.log_stop_time("train_wall")
-#.max_epoch, self.cfg.task.warmup_updates)
         try:
             if self.criterion.beta:
                 t = self.get_num_updates()

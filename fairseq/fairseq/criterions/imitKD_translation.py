@@ -66,6 +66,10 @@ class ImitKDTConfig(FairseqDataclass):
         default="/scratch/hubert/knn_ast_kd_nmt/fairseq/examples/translation/data-bin/MUST_source/dict.de.txt",
         metadata={"help": "vocab file for ast model output"},
     )
+    data_mix_rate: int = field(
+        default=4,
+        metadata={"help": "number of step to run before updating the model;s parameters"},
+    )
 
 
 def valid_loss(lprobs, target, ignore_index=None, reduce=True):
@@ -187,6 +191,7 @@ class ImitKD(FairseqCriterion):
             beta,
             bpe_codes,
             bpe_codes_model,
+            data_mix_rate,
             model_vocab_src,
             model_vocab_tgt,
             ignore_prefix_size=0,
@@ -195,6 +200,7 @@ class ImitKD(FairseqCriterion):
         super().__init__(task)
         self.ignore_prefix_size = ignore_prefix_size
         self.report_accuracy = report_accuracy
+        self.data_mix_rate = data_mix_rate
         self.expert, _ = load_model_ensemble([expert], arg_overrides={"data": path})
         self.expert = self.expert[-1]
         self.expert_vocab_src = Dictionary.load(expert_vocab_src)
