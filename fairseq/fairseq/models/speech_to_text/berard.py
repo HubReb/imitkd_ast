@@ -431,7 +431,6 @@ class LSTMDecoder(FairseqIncrementalDecoder):
                 projection.
         """
         super().__init__(dictionary)
-        self.knn_keytype = args.knn_keytype if hasattr(args, 'knn_keytype') else None
 
         self.num_layers = num_layers
         self.hidden_size = hidden_size
@@ -564,8 +563,6 @@ class LSTMDecoder(FairseqIncrementalDecoder):
 
             # collect the output of the top layer
             outs.append(hidden)
-            if self.knn_keytype == 'last_ffn_input':
-                knn_emb = attention_out.clone()
 
         # cache previous states (no-op except during incremental generation)
         utils.set_incremental_state(
@@ -592,11 +589,6 @@ class LSTMDecoder(FairseqIncrementalDecoder):
         # project back to size of vocabulary
         x = self.output_projection(x)
 
-        # to return the full attn_scores tensor, we need to fix the decoder
-        # to account for subsampling input frames
-        # return x, attn_scores
-        if self.knn_keytype == 'last_ffn_input':
-            return x, {self.knn_keytype: knn_emb}
 
         return x, None
 
