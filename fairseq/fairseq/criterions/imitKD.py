@@ -222,6 +222,7 @@ class ImitKD(FairseqCriterion):
         self.report_accuracy = report_accuracy
         self.expert, _ = load_model_ensemble([expert], arg_overrides={"data": path})
         self.expert = self.expert[-1]
+        self.expert = self.expert.eval()
         self.expert_vocab_src = Dictionary.load(expert_vocab_src)
         self.expert_vocab_tgt = Dictionary.load(expert_vocab_tgt)
         self.expert.requires_grad = False

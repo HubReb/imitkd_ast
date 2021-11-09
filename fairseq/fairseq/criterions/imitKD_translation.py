@@ -203,6 +203,7 @@ class ImitKD(FairseqCriterion):
         self.data_mix_rate = data_mix_rate
         self.expert, _ = load_model_ensemble([expert], arg_overrides={"data": path})
         self.expert = self.expert[-1]
+        self.expert = self.expert.eval()
         self.expert_vocab_src = Dictionary.load(expert_vocab_src)
         self.expert_vocab_tgt = Dictionary.load(expert_vocab_tgt)
         self.model_src_dict = Dictionary.load(model_vocab_src)
