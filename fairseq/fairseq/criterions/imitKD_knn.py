@@ -78,7 +78,7 @@ class ImitKDConfig(FairseqDataclass):
         default=1024,
         metadata={"help": "number of nearest neighbors to retrieve"}
     )
-    # default value is the one for news-comm-14
+    # default value is the one for news-comm-14 - we do not need this argument for knn decoding only for knn store creation - but cannot initialize knnlm object without it
     dstore_size: int = field(
             default=9651607,
             metadata={"help": "number of items in the knn datastore"},
@@ -120,7 +120,6 @@ class ImitKDConfig(FairseqDataclass):
             default=False
     )
     use_faiss_only: bool = field(default=False)
-    save_knn_dstore: bool = field(default=False)
     dstore_mmap: Optional[str] = field(default=None)
     knn_embed_dim: Optional[int] = field(default=None)
     knn_start: int = field(default=-1)
@@ -232,7 +231,7 @@ def imit_kd_loss(
                     expert_vocab_tgt.pad(),
                     expert_vocab_tgt.eos(),
                     left_pad=False,
-                    move_eos_to_beginning=True
+                    move_eos_to_beginning=False
                 )
 
         else:
@@ -337,7 +336,6 @@ class ImitKDKNN(FairseqCriterion):
             dstore_fp16,
             move_dstore_to_mem,
             use_faiss_only,
-            save_knn_dstore,
             dstore_mmap,
             knn_embed_dim,
             knn_start,
@@ -375,9 +373,9 @@ class ImitKDKNN(FairseqCriterion):
                     knnmt=knnmt,
                     knn_keytype=knn_keytype,
                     probe=probe,
+                    dstore_size=dstore_size,
                     k=k,
                     knn_temp=knn_temp,
-                    dstore_size=dstore_size,
                     indexfile=indexfile,
                     lmbda=lmbda,
                     knn_sim_func=knn_sim_func,
@@ -386,7 +384,6 @@ class ImitKDKNN(FairseqCriterion):
                     dstore_fp16=dstore_fp16,
                     move_dstore_to_mem=move_dstore_to_mem,
                     use_faiss_only=use_faiss_only,
-                    save_knn_dstore=save_knn_dstore,
                     dstore_mmap=dstore_mmap,
                     knn_embed_dim=knn_embed_dim,
                     knn_start=knn_start,
@@ -406,7 +403,7 @@ class ImitKDKNN(FairseqCriterion):
                     trained_index=trained_index,
                     write_index=write_index
                     )
-            self.expert = SequenceGenerator([self.expert], self.expert_vocab_tgt, args=self.knn_args, beam_size=5)
+            self.expert = SequenceGenerator([self.expert], self.expert_vocab_tgt, args=self.knn_args, beam_size=1)
         else:
             self.expert, _ = load_model_ensemble([expert], arg_overrides={"data": path})
             self.expert = self.expert[-1]
