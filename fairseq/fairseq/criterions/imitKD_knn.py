@@ -195,19 +195,38 @@ def imit_kd_loss(
                 expert_vocab_tgt.eos(),
                 left_pad=False,
                 move_eos_to_beginning=True,
-            ).cuda()
+            ).to(torch.int64).cuda()
         },
         "target": generated_dataset["target"],
         "target_lengths": generated_dataset["target_lengths"],
         "ntokens": generated_dataset["ntokens"],
         "nsentences": generated_dataset["nsentences"],
     }
+    prefix_tokens = collate_tokens(
+                [
+                    expert_vocab_tgt.encode_line(
+                        t, add_if_not_exist=False, append_eos=True
+                    ) for t in encoded_prevs
+                ],
+                expert_vocab_tgt.pad(),
+                expert_vocab_tgt.eos(),
+                left_pad=False,
+                move_eos_to_beginning=False,
+            ).to(torch.int64).cuda()
+
     with torch.no_grad():
         if use_knnmt:
-            hypos = expert._generate(sample_expert)
-            expert_preds = []
-            for hypo in hypos:
-                expert_preds.append(hypo[0]["tokens"].clone().detach())
+            expert_preds = [[] for _ in range(sample_expert["net_input"]["prev_output_tokens"].shape[0])]
+            print(sample_expert["net_input"]["prev_output_tokens"].shape)
+            for i in range(sample_expert["net_input"]["prev_output_tokens"].shape[1]):
+                print(i, sample_expert["net_input"]["prev_output_tokens"][:, :i].shape)
+                hypos = expert._generate(sample_expert, prefix_tokens=prefix_tokens[:, :i])
+                for j, hypo in enumerate(hypos):
+                    if len(hypo[0]["tokens"]) <= i:
+                        expert_preds[j].append(hypo[0]["tokens"][-1])
+                    else:
+                        expert_preds[j].append(hypo[0]["tokens"][i].clone().detach())
+            expert_preds = [torch.tensor(j) for j in expert_preds]
             expert_preds = collate_tokens(
                     expert_preds,
                     expert_vocab_tgt.pad(),
