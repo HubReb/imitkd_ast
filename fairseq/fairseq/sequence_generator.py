@@ -623,6 +623,7 @@ class SequenceGenerator(nn.Module):
 
             # reorder incremental state in decoder
             reorder_state = active_bbsz_idx
+            # we can return the token matrix if no sample has been finished yet
             if step == generated_length and num_remaining_sent == original_bsz:
                 return tokens
 
