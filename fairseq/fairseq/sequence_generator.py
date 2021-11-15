@@ -202,6 +202,7 @@ class SequenceGenerator(nn.Module):
         prefix_tokens: Optional[Tensor] = None,
         constraints: Optional[Tensor] = None,
         bos_token: Optional[int] = None,
+        generated_length: Optional[int] = None
     ):
         incremental_states = torch.jit.annotate(
             List[Dict[str, Dict[str, Optional[Tensor]]]],
@@ -238,6 +239,7 @@ class SequenceGenerator(nn.Module):
         # bsz: total number of sentences in beam
         # Note that src_tokens may have more than 2 dimensions (i.e. audio features)
         bsz, src_len = src_tokens.size()[:2]
+        original_bsz = bsz
         beam_size = self.beam_size
 
         if constraints is not None and not self.search.supports_constraints:
@@ -383,35 +385,35 @@ class SequenceGenerator(nn.Module):
                         use_dtype=torch.float16 if self.args.dstore_fp16 else torch.float32,
                         save_knns=self.args.save_knns,
                         knn_temp=self.args.knn_temp)
+                if not isinstance(knn_scores, int):
+                    if self.args.save_knns:
+                        k, p, v = knn_scores[1]
+                        knns[:, step, :] = k
+                        vals[:, step, :] = v
+                        probs[:, step, :] = p
+                        knn_scores = knn_scores[0]
 
-                if self.args.save_knns:
-                    k, p, v = knn_scores[1]
-                    knns[:, step, :] = k
-                    vals[:, step, :] = v
-                    probs[:, step, :] = p
-                    knn_scores = knn_scores[0]
-
-                #print(knn_scores.shape)
-                if self.args.lmbda > 0:
-                    lprobs = torch.stack([lprobs, knn_scores.to(lprobs)], dim=0)
-                    coeffs = torch.ones_like(lprobs)
-                    coeffs[0] = np.log(1 - self.args.lmbda)
-                    coeffs[1] = np.log(self.args.lmbda)
-                    lprobs = torch.logsumexp(lprobs + coeffs, dim=0)
-                else:
-                    if self.args.drop_lang_tok and step == 0:
-                        lprobs = lprobs
+                    #print(knn_scores.shape)
+                    if self.args.lmbda > 0:
+                        lprobs = torch.stack([lprobs, knn_scores.to(lprobs)], dim=0)
+                        coeffs = torch.ones_like(lprobs)
+                        coeffs[0] = np.log(1 - self.args.lmbda)
+                        coeffs[1] = np.log(self.args.lmbda)
+                        lprobs = torch.logsumexp(lprobs + coeffs, dim=0)
                     else:
-                        if self.args.knn_backoff and (torch.exp(torch.max(knn_scores, dim=-1)[0]) < self.args.knn_backoff_thresh).any():
-                            #print(knn_scores)
-                            #print(knn_scores[torch.exp(torch.max(knn_scores, dim=-1)[0]) < 0.1])
-                            #print(lprobs[torch.exp(torch.max(knn_scores, dim=-1)[0]) < 0.1])
-                            #inds = torch.exp(torch.max(knn_scores, dim=-1)[0]) < 0.9
-                            knn_scores[torch.exp(torch.max(knn_scores, dim=-1)[0]) < self.args.knn_backoff_thresh] = lprobs[torch.exp(torch.max(knn_scores, dim=-1)[0]) < self.args.knn_backoff_thresh]
-                            #print("after")
-                            #print(knn_scores)
-                            #print(knn_scores[inds])
-                        lprobs = knn_scores
+                        if self.args.drop_lang_tok and step == 0:
+                            lprobs = lprobs
+                        else:
+                            if self.args.knn_backoff and (torch.exp(torch.max(knn_scores, dim=-1)[0]) < self.args.knn_backoff_thresh).any():
+                                #print(knn_scores)
+                                #print(knn_scores[torch.exp(torch.max(knn_scores, dim=-1)[0]) < 0.1])
+                                #print(lprobs[torch.exp(torch.max(knn_scores, dim=-1)[0]) < 0.1])
+                                #inds = torch.exp(torch.max(knn_scores, dim=-1)[0]) < 0.9
+                                knn_scores[torch.exp(torch.max(knn_scores, dim=-1)[0]) < self.args.knn_backoff_thresh] = lprobs[torch.exp(torch.max(knn_scores, dim=-1)[0]) < self.args.knn_backoff_thresh]
+                                #print("after")
+                                #print(knn_scores)
+                                #print(knn_scores[inds])
+                            lprobs = knn_scores
  
             lprobs[lprobs != lprobs] = torch.tensor(-math.inf).to(lprobs)
 
@@ -621,6 +623,9 @@ class SequenceGenerator(nn.Module):
 
             # reorder incremental state in decoder
             reorder_state = active_bbsz_idx
+            if step == generated_length and num_remaining_sent == original_bsz:
+                return tokens
+
 
         # sort by score descending
         for sent in range(len(finalized)):

@@ -67,12 +67,12 @@ class ImitKDConfig(FairseqDataclass):
     )
     ## knn related items
     knn_keytype: Optional[str] = field(
-            default=None,
-            metadata={"help": "use last_ffn_input"}
+        default=None,
+        metadata={"help": "use last_ffn_input"}
     )
     probe: Optional[int] = field(
-            default=8,
-            metadata={"help": "for FAISS, the number of lists to query"},
+        default=8,
+        metadata={"help": "for FAISS, the number of lists to query"},
     )
     k: Optional[int] = field(
         default=1024,
@@ -80,44 +80,44 @@ class ImitKDConfig(FairseqDataclass):
     )
     # default value is the one for news-comm-14 - we do not need this argument for knn decoding only for knn store creation - but cannot initialize knnlm object without it
     dstore_size: int = field(
-            default=9651607,
-            metadata={"help": "number of items in the knn datastore"},
+        default=9651607,
+        metadata={"help": "number of items in the knn datastore"},
     )
     dstore_filename: Optional[str] = field(
-            default=None,
-            metadata={"help": "File where the knn datastore is saved"}
+        default=None,
+        metadata={"help": "File where the knn datastore is saved"}
     )
     indexfile: Optional[str] = field(
-            default=None,
-            metadata={"help": "File containing the index built using faiss for knn"}
+        default=None,
+        metadata={"help": "File containing the index built using faiss for knn"}
     )
     lmbda: Optional[float] = field(
-            default=0.0,
-            metadata={"help": "controls interpolation with knn, 0.0 = no knn"}
+        default=0.0,
+        metadata={"help": "controls interpolation with knn, 0.0 = no knn"}
     )
     knn_sim_func: Optional[str] = field(
-            default=None,
-            metadata={"help": "similarity function to use for knns"}
+        default=None,
+        metadata={"help": "similarity function to use for knns"}
     )
     faiss_metric_type: Optional[str] = field(
-            default='l2',
-            metadata={"help": "the distance metric for faiss"}
+        default='l2',
+        metadata={"help": "the distance metric for faiss"}
     )
     no_load_keys: bool = field(
-            default=False,
-            metadata={"help": "do not load keys"}
+        default=False,
+        metadata={"help": "do not load keys"}
     )
     dstore_fp16: bool = field(
-            default=False,
-            metadata={"help": "if true, datastore items are saved in fp16 and int16"}
+        default=False,
+        metadata={"help": "if true, datastore items are saved in fp16 and int16"}
     )
     move_dstore_to_mem: bool = field(
-            default=False,
-            metadata={"help": "move the keys and values for knn to memory"}
+        default=False,
+        metadata={"help": "move the keys and values for knn to memory"}
     )
     # knnmt arguments
     knnmt: bool = field(
-            default=False
+        default=False
     )
     use_faiss_only: bool = field(default=False)
     dstore_mmap: Optional[str] = field(default=None)
@@ -140,7 +140,6 @@ class ImitKDConfig(FairseqDataclass):
     trained_index: Optional[str] = field(default=None)
     write_index: Optional[str] = field(default=None)
     ## knnlm related items
-
 
 
 def valid_loss(lprobs, target, ignore_index=None, reduce=True):
@@ -202,37 +201,42 @@ def imit_kd_loss(
         "nsentences": generated_dataset["nsentences"],
     }
     prefix_tokens = collate_tokens(
-                [
-                    expert_vocab_tgt.encode_line(
-                        t, add_if_not_exist=False, append_eos=True
-                    ) for t in encoded_prevs
-                ],
-                expert_vocab_tgt.pad(),
-                expert_vocab_tgt.eos(),
-                left_pad=False,
-                move_eos_to_beginning=False,
-            ).to(torch.int64).cuda()
-
+        [
+            expert_vocab_tgt.encode_line(
+                t, add_if_not_exist=False, append_eos=True
+            ) for t in encoded_prevs
+        ],
+        expert_vocab_tgt.pad(),
+        expert_vocab_tgt.eos(),
+        left_pad=False,
+        move_eos_to_beginning=False,
+    ).to(torch.int64).cuda()
+    if expert.beam_size > 1:
+        import sys
+        sys.exit("ImitKD knn with beam size > 1 is not supported")
     with torch.no_grad():
         if use_knnmt:
             expert_preds = [[] for _ in range(sample_expert["net_input"]["prev_output_tokens"].shape[0])]
-            print(sample_expert["net_input"]["prev_output_tokens"].shape)
             for i in range(sample_expert["net_input"]["prev_output_tokens"].shape[1]):
-                print(i, sample_expert["net_input"]["prev_output_tokens"][:, :i].shape)
-                hypos = expert._generate(sample_expert, prefix_tokens=prefix_tokens[:, :i])
+                hypos = expert._generate(sample_expert, prefix_tokens=prefix_tokens[:, :i], generated_length=i)
                 for j, hypo in enumerate(hypos):
-                    if len(hypo[0]["tokens"]) <= i:
-                        expert_preds[j].append(hypo[0]["tokens"][-1])
+                    if not isinstance(hypo[0], dict):
+                        # each hypo starts with eos as it has not been finalized with sequence_generator.finalize_hypos (removes eos at beginning among other clean ups)
+                        expert_preds[j].append(hypo[i+1])
                     else:
-                        expert_preds[j].append(hypo[0]["tokens"][i].clone().detach())
+                        # hypos have been finished
+                        try:
+                            expert_preds[j].append(hypo[0]["tokens"][i])
+                        except IndexError:  #  prefix tokens already covered the entire sentence so we pad
+                            expert_preds[j].append(expert_vocab_tgt.pad())
             expert_preds = [torch.tensor(j) for j in expert_preds]
             expert_preds = collate_tokens(
-                    expert_preds,
-                    expert_vocab_tgt.pad(),
-                    expert_vocab_tgt.eos(),
-                    left_pad=False,
-                    move_eos_to_beginning=False
-                )
+                expert_preds,
+                expert_vocab_tgt.pad(),
+                expert_vocab_tgt.eos(),
+                left_pad=False,
+                move_eos_to_beginning=False
+            )
 
         else:
             expert_logits = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=True).detach()
@@ -284,7 +288,7 @@ def imit_kd_loss(
                 )
                 ).replace("< / s >", "</s>").replace("<< unk >>", "<unk>"),
                 add_if_not_exist=False,
-                )
+            )
             for t in expert_preds
         ]
         preds = collate_tokens(
@@ -365,44 +369,45 @@ class ImitKDKNN(FairseqCriterion):
         self.expert_vocab_src = Dictionary.load(expert_vocab_src)
         self.expert_vocab_tgt = Dictionary.load(expert_vocab_tgt)
         if knnmt:
-            self.expert, _ = load_model_ensemble([expert], arg_overrides={"data": path, "knn_keytype": "last_ffn_input"})
+            self.expert, _ = load_model_ensemble([expert],
+                                                 arg_overrides={"data": path, "knn_keytype": "last_ffn_input"})
             self.expert = self.expert[-1]
             self.knnmt = knnmt
             from argparse import Namespace
             self.knn_args = Namespace(
-                    knnmt=knnmt,
-                    knn_keytype=knn_keytype,
-                    probe=probe,
-                    dstore_size=dstore_size,
-                    k=k,
-                    knn_temp=knn_temp,
-                    indexfile=indexfile,
-                    lmbda=lmbda,
-                    knn_sim_func=knn_sim_func,
-                    faiss_metric_type=faiss_metric_type,
-                    no_load_keys=no_load_keys,
-                    dstore_fp16=dstore_fp16,
-                    move_dstore_to_mem=move_dstore_to_mem,
-                    use_faiss_only=use_faiss_only,
-                    dstore_mmap=dstore_mmap,
-                    knn_embed_dim=knn_embed_dim,
-                    knn_start=knn_start,
-                    knn_proc=knn_proc,
-                    save_knns=save_knns,
-                    save_knns_filename=save_knns_filename,
-                    save_knn_subset=save_knn_subset,
-                    save_knn_subset_num=save_knn_subset_num,
-                    knn_add_to_idx=knn_add_to_idx,
-                    knn_trim_data=knn_trim_data,
-                    knn_add_num_to_idx=knn_add_num_to_idx,
-                    knn_add_idx_global_id=knn_add_idx_global_id,
-                    knn_add_idx_pos_in_dataset=knn_add_idx_pos_in_dataset,
-                    knn_q2gpu=knn_q2gpu,
-                    drop_lang_tok=drop_lang_tok,
-                    knn_backoff=knn_backoff,
-                    trained_index=trained_index,
-                    write_index=write_index
-                    )
+                knnmt=knnmt,
+                knn_keytype=knn_keytype,
+                probe=probe,
+                dstore_size=dstore_size,
+                k=k,
+                knn_temp=knn_temp,
+                indexfile=indexfile,
+                lmbda=lmbda,
+                knn_sim_func=knn_sim_func,
+                faiss_metric_type=faiss_metric_type,
+                no_load_keys=no_load_keys,
+                dstore_fp16=dstore_fp16,
+                move_dstore_to_mem=move_dstore_to_mem,
+                use_faiss_only=use_faiss_only,
+                dstore_mmap=dstore_mmap,
+                knn_embed_dim=knn_embed_dim,
+                knn_start=knn_start,
+                knn_proc=knn_proc,
+                save_knns=save_knns,
+                save_knns_filename=save_knns_filename,
+                save_knn_subset=save_knn_subset,
+                save_knn_subset_num=save_knn_subset_num,
+                knn_add_to_idx=knn_add_to_idx,
+                knn_trim_data=knn_trim_data,
+                knn_add_num_to_idx=knn_add_num_to_idx,
+                knn_add_idx_global_id=knn_add_idx_global_id,
+                knn_add_idx_pos_in_dataset=knn_add_idx_pos_in_dataset,
+                knn_q2gpu=knn_q2gpu,
+                drop_lang_tok=drop_lang_tok,
+                knn_backoff=knn_backoff,
+                trained_index=trained_index,
+                write_index=write_index
+            )
             self.expert = SequenceGenerator([self.expert], self.expert_vocab_tgt, args=self.knn_args, beam_size=1)
         else:
             self.expert, _ = load_model_ensemble([expert], arg_overrides={"data": path})
