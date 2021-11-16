@@ -5,7 +5,7 @@
 
 import math
 from dataclasses import dataclass, field
-from random import randint
+from numpy.random import randint
 
 import sentencepiece as spm
 import fastBPE
