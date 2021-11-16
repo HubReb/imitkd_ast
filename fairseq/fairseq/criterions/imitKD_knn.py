@@ -5,6 +5,7 @@
 
 import math
 from dataclasses import dataclass, field
+from random import randint
 
 import sentencepiece as spm
 import fastBPE
@@ -216,19 +217,11 @@ def imit_kd_loss(
         sys.exit("ImitKD knn with beam size > 1 is not supported")
     with torch.no_grad():
         if use_knnmt:
-            expert_preds = [[] for _ in range(sample_expert["net_input"]["prev_output_tokens"].shape[0])]
-            for i in range(sample_expert["net_input"]["prev_output_tokens"].shape[1]):
-                hypos = expert._generate(sample_expert, prefix_tokens=prefix_tokens[:, :i], generated_length=i)
-                for j, hypo in enumerate(hypos):
-                    if not isinstance(hypo[0], dict):
-                        # each hypo starts with eos as it has not been finalized with sequence_generator.finalize_hypos (removes eos at beginning among other clean ups)
-                        expert_preds[j].append(hypo[i+1])
-                    else:
-                        # hypos have been finished
-                        try:
-                            expert_preds[j].append(hypo[0]["tokens"][i])
-                        except IndexError:  #  prefix tokens already covered the entire sentence so we pad
-                            expert_preds[j].append(expert_vocab_tgt.pad())
+            expert_preds = []
+            timestep = randint(0, sample_expert["net_input"]["prev_output_tokens"].shape[1])
+            hypos = expert._generate(sample_expert, prefix_tokens=prefix_tokens[:, :timestep])
+            for hypo in hypos:
+                expert_preds.append(hypo[0]["tokens"].clone().detach())
             expert_preds = [torch.tensor(j) for j in expert_preds]
             expert_preds = collate_tokens(
                 expert_preds,
