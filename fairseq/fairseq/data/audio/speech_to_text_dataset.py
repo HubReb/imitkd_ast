@@ -355,19 +355,34 @@ class SpeechToTextDataset(FairseqDataset):
                 )
                 prev_output_tokens = prev_output_tokens.index_select(0, order)
                 ntokens = sum(t.size(0) for _, _, t, _ in samples)
-        out = {
-            "id": indices,
-            "net_input": {
-                "src_tokens": frames,
-                "src_lengths": n_frames,
-                "prev_output_tokens": prev_output_tokens,
-                "src_text": source_tokens
-            },
-            "target": target,
-            "target_lengths": target_lengths,
-            "ntokens": ntokens,
-            "nsentences": len(samples),
-        }
+        # fast check; adapted from https://stackoverflow.com/questions/3844801/check-if-all-elements-in-a-list-are-identical
+        if source_tokens.count(source_tokens[0]) == len(source_tokens) and source_tokens[0] == '':
+            out = {
+                "id": indices,
+                "net_input": {
+                    "src_tokens": frames,
+                    "src_lengths": n_frames,
+                    "prev_output_tokens": prev_output_tokens,
+                },
+                "target": target,
+                "target_lengths": target_lengths,
+                "ntokens": ntokens,
+                "nsentences": len(samples),
+            }
+        else:
+            out = {
+                "id": indices,
+                "net_input": {
+                    "src_tokens": frames,
+                    "src_lengths": n_frames,
+                    "prev_output_tokens": prev_output_tokens,
+                    "src_text": source_tokens
+                },
+                "target": target,
+                "target_lengths": target_lengths,
+                "ntokens": ntokens,
+                "nsentences": len(samples),
+            }
         return out
 
     def num_tokens(self, index):
