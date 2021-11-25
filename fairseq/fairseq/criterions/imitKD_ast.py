@@ -5,6 +5,7 @@
 
 import math
 from dataclasses import dataclass, field
+import copy
 
 import sentencepiece as spm
 
@@ -77,7 +78,7 @@ def imit_kd_loss(
         ignore_index,
 ):
     encoded_prevs = generated_dataset["net_input"]["prev_output_tokens"]
-    sample_expert = generated_dataset.copy()
+    sample_expert = copy.deepcopy(generated_dataset)
     sample_expert["net_input"]["prev_output_tokens"] = encoded_prevs.cuda()
     sample_expert["net_input"].pop("src_text", None)
     with torch.no_grad():

@@ -5,6 +5,7 @@
 
 import math
 from dataclasses import dataclass, field
+import copy
 
 import sentencepiece as spm
 import fastBPE
@@ -185,6 +186,7 @@ def imit_kd_loss(
             move_eos_to_beginning=False
         )
         preds = preds.to(torch.int64).cuda()
+    generated_dataset["net_input"].pop("src_text", None)
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
     if preds.dim() == lprobs.dim() - 1:
         preds = preds.unsqueeze(-1)
@@ -244,7 +246,9 @@ class ImitKD(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        net_output = model(**sample["net_input"])
+        sample_s = copy.deepcopy(sample)
+        sample_s["net_input"].pop("src_text", None)
+        net_output = model(**sample_s["net_input"])
         loss = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
         sample_size = (
             sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
@@ -279,7 +283,9 @@ class ImitKD(FairseqCriterion):
             loss = valid_loss(lprobs, target, self.padding_idx, reduce=reduce)
         else:
             source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
-            generated_dataset = self.generate_imit_batch(model, sample)
+            samplele_s = copy.deepcopy(sample)
+            sample_s["net_input"].pop("src_text", None)
+            generated_dataset = self.generate_imit_batch(model, sample_s)
             loss = imit_kd_loss(
                 generated_dataset,
                 model,
