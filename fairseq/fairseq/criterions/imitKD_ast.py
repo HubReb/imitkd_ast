@@ -39,7 +39,7 @@ class ImitKDConfig(FairseqDataclass):
     )
 
     path: str = field(
-        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/wmt19.en-de.joined-dict.ensemble/",
+        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/covost/en/",
         metadata={"help": "directory with expert's dictionaries"},
     )
     sp_model: str = field(
@@ -75,15 +75,15 @@ def imit_kd_loss(
         model_dict,
         sp_model,
         ignore_index,
-        source_lengths
 ):
     encoded_prevs = generated_dataset["net_input"]["prev_output_tokens"]
     sample_expert = generated_dataset.copy()
     sample_expert["net_input"]["prev_output_tokens"] = encoded_prevs.cuda()
+    sample_expert["net_input"].pop("src_text", None)
     with torch.no_grad():
         expert_logits = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=True).detach()
         expert_preds = expert_logits.argmax(-1)
-        preds = preds.to(torch.int64).cuda()
+        preds = expert_preds.to(torch.int64).cuda()
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
     if preds.dim() == lprobs.dim() - 1:
         preds = preds.unsqueeze(-1)
@@ -103,12 +103,9 @@ class ImitKDAST(FairseqCriterion):
             self,
             task,
             expert,
-            expert_vocab_src,
-            expert_vocab_tgt,
             path,
             beta,
             sp_model,
-            bpe_codes,
             data_mix_rate,
             ignore_prefix_size=0,
             report_accuracy=False,
@@ -180,7 +177,6 @@ class ImitKDAST(FairseqCriterion):
                 self.dict,
                 self.sp_model,
                 self.padding_idx,
-                source_lengths
             )
         return loss
 
