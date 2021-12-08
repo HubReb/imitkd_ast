@@ -185,13 +185,12 @@ def imit_kd_loss(
     # if preds.shape[1] > lprobs.shape[1]:
         # preds = preds[:, :lprobs.shape[1], :]
     #imit_kd_loss_for_sample = -lprobs.gather(dim=-1, index=preds)
-    print(lprobs)
-    lprobs = lprobs[~ignore_index]
-    print(lprobs)
-    print(expert_logits)
-    expert_logits = expert_logits[~ignore_index]
-    print(expert_logits)
-    kl_loss = kl_div(lprobs, expert_logits, reduction="batchmean")
+    pad_mask = (lprobs == model_dict.pad())
+    # pad_mask |= (lprobs == model_dict.eos())      inplace or: original paper removes eos from loss, fairseq generally keeps it - keep it for now
+    lprobs = lprobs[~pad_mask]
+    pad_mask = (expert_logits == expert_vocab_tgt.pad())
+    expert_logits = expert_logits[~pad_mask]
+    kl_loss = kl_div(lprobs, expert_logits, reduction="sum", log_target=True)
     # if ignore_index is not None:
         # pad_mask = preds.eq(ignore_index)
         # imit_kd_loss_for_sample.masked_fill_(pad_mask, 0.0)
