@@ -62,16 +62,16 @@ class EUROPARL(Dataset):
             warnings.simplefilter("always")
             warnings.warn("WARNING: EUROPARL-ST has no single asr part - we use the en-de alignments to get en asr")
             txt_root = _root / "de"
-            with open(txt_root / f"{split}/segments.en") as f:
+            with open(txt_root / f"{split}/segments.tok.en") as f:
                 utterances = [r.strip() for r in f.read().split("\n")[:-1]]
         else:
             assert target_language in self.LANGUAGES
             txt_root = _root / f"{target_language}/"
-            with open(txt_root / f"{split}/segments.{source_language}") as f:
+            with open(txt_root / f"{split}/segments.tok.{source_language}") as f:
                 utterances = [r.strip() for r in f.read().split("\n")[:-1]]
             assert txt_root.is_dir()
             # Load target utterances
-            with open(txt_root / f"{split}/segments.{target_language}") as f:
+            with open(txt_root / f"{split}/segments.tok.{target_language}") as f:
                 translations = [r.strip() for r in f.read().split("\n")[:-1]]
             assert len(translations) == len(utterances)
         segments = [{} for _ in utterances]
