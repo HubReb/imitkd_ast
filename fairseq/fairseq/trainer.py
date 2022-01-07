@@ -16,6 +16,9 @@ from itertools import chain
 from typing import Any, Dict, List
 
 import torch
+import numpy as np
+
+
 from fairseq import checkpoint_utils, models, optim, utils
 from fairseq.dataclass.configs import FairseqConfig
 from fairseq.dataclass.utils import convert_namespace_to_omegaconf
@@ -942,7 +945,8 @@ class Trainer(object):
         try:
             if self.criterion.beta:
                 t = self.get_num_updates()
-                self.criterion.beta = 200 ** (-(t / self.cfg.optimization.max_update))
+                # self.criterion.beta = 20 ** (-(t / self.cfg.optimization.max_update))
+                self.criterion.beta =  1 / (1 + np.exp((t / self.cfg.optimization.max_update - 0.5) * 20))
         except AttributeError:
             pass
         return logging_output
