@@ -23,7 +23,6 @@ from fairseq.sequence_generator import SequenceGenerator
 from nltk.translate.bleu_score import sentence_bleu
 
 
-
 @dataclass
 class ImitKDConfig(FairseqDataclass):
     expert: str = field(
@@ -126,7 +125,7 @@ def imit_kd_loss(
 
 
 @register_criterion(
-    "imit_kd_checked_predictions", dataclass=ImitKDConfig
+    'imit_kd_roll_out_expert', dataclass=ImitKDConfig
 )
 class ImitKD(FairseqCriterion):
     def __init__(
@@ -272,12 +271,14 @@ class ImitKD(FairseqCriterion):
             targets = sample["net_input"]["prev_output_tokens"].data.tolist()
             max_length = max([len(i) for i in targets])  # let's avoid blowing up the GPU RAM, shall we?
             student_generator = SequenceGenerator([student], self.dict, beam_size=1, max_len=max_length)
-            expert_generator = SequenceGenerator([self.expert], self.expert_vocab_tgt, beam_size=1)
+            expert_generator = SequenceGenerator([self.expert], self.expert_vocab_tgt, beam_size=1, max_len=max_length)
             student_generator.cuda()
             hypos = student_generator._generate(sample)
             # using parameter , generated_length=max_length would achieve the same  as cutting of hypothesis at
             # [:max_length] after generation, but requires dealing with token matrix instead of the dict
             hypos_expert = expert_generator._generate(sample_expert)
+            prefix_tokens = []
+            indices = []
             for i, hypo in enumerate(hypos):
                 # prediction_list = hypo[0]["tokens"].tolist()
                 prediction_list = self.dict.string(
@@ -296,9 +297,25 @@ class ImitKD(FairseqCriterion):
                 )
                 if score >= 0.5:
                     # print(prediction_list, targets[i])
+                    prefix_tokens.append(hypo[0]["tokens"].clone().detach())
+                else:
+                    prefix_tokens.append(torch.tensor(targets[i][:2]).detach())
+                    indices.append(i)
+            prefix_tokens = collate_tokens(
+                prefix_tokens,
+                self.dict.pad(),
+                self.dict.eos(),
+                left_pad=False,
+                move_eos_to_beginning=False
+            ).detach().cuda()
+            sample_expert["net_input"]["prev_output_tokens"] = []
+            hypos_expert = expert_generator._generate(sample_expert, prefix_tokens=prefix_tokens)
+            for i, hypo in enumerate(hypos_expert):
+                if i in indices:
                     targets[i] = hypo[0]["tokens"].clone().detach()
                 else:
                     targets[i] = torch.tensor(targets[i]).clone().detach()
+            student.train()
             sample["net_input"]["prev_output_tokens"] = collate_tokens(
                 targets,
                 self.dict.pad(),
@@ -306,7 +323,6 @@ class ImitKD(FairseqCriterion):
                 left_pad=False,
                 move_eos_to_beginning=False
             ).detach().cuda()
-            student.train()
         return sample
 
     def compute_accuracy(self, model, net_output, sample):
