@@ -23,7 +23,6 @@ from fairseq.sequence_generator import SequenceGenerator
 from nltk.translate.bleu_score import sentence_bleu
 
 
-
 @dataclass
 class ImitKDConfig(FairseqDataclass):
     expert: str = field(
@@ -38,10 +37,6 @@ class ImitKDConfig(FairseqDataclass):
         default=0,
         metadata={"help": "Ignore first N tokens"},
     )
-    beta: int = field(
-        default=1,
-        metadata={"help": "replacement prop"},
-    )
 
     expert_vocab_tgt: str = field(
         default="wmt19.en-de.joined-dict.ensemble/dict.de.txt",
@@ -55,19 +50,9 @@ class ImitKDConfig(FairseqDataclass):
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/wmt19.en-de.joined-dict.ensemble/",
         metadata={"help": "directory with expert's dictionaries"},
     )
-    sp_model: str = field(
-        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/covost/en"
-                "/spm_bpe8000_st_en_de.model",
-        metadata={"help": "student's sentencepiece model"},
-    )
-
     bpe_codes: str = field(
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
         metadata={"help": "expert's bpe codes"},
-    )
-    data_mix_rate: int = field(
-        default=1,
-        metadata={"help": "number of step to run before updating the model;s parameters"},
     )
 
 
@@ -92,9 +77,6 @@ def imit_kd_loss(
         source_text,
         model_dict,
         expert_vocab_tgt,
-        sp_model,
-        bpe,
-        ignore_index,
         source_lengths
 ):
     sample_expert = {
@@ -126,7 +108,7 @@ def imit_kd_loss(
 
 
 @register_criterion(
-    "imit_kd_checked_predictions", dataclass=ImitKDConfig
+    "imit_kd_beta_word_level_oracle", dataclass=ImitKDConfig
 )
 class ImitKD(FairseqCriterion):
     def __init__(
@@ -136,16 +118,12 @@ class ImitKD(FairseqCriterion):
             expert_vocab_src,
             expert_vocab_tgt,
             path,
-            beta,
-            sp_model,
             bpe_codes,
-            data_mix_rate,
             ignore_prefix_size=0,
             report_accuracy=False,
     ):
         super().__init__(task)
         self.ignore_prefix_size = ignore_prefix_size
-        self.data_mix_rate = data_mix_rate
         self.report_accuracy = report_accuracy
         self.expert, _ = load_model_ensemble([expert], arg_overrides={"data": path})
         self.expert = self.expert[-1]
@@ -158,10 +136,7 @@ class ImitKD(FairseqCriterion):
         self.bpe = fastBPE.fastBPE(bpe_codes, expert_vocab_tgt)
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
-        self.beta = beta
-        self.sp_model = spm.SentencePieceProcessor()
-        self.sp_model.Load(sp_model)
-        self.sp_model.requires_grad = False
+        self.beta = 1
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
@@ -210,10 +185,7 @@ class ImitKD(FairseqCriterion):
             source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
             sample_s = copy.deepcopy(sample)
             sample_s["net_input"].pop("src_text", None)
-            if self.beta > 0.5:
-                generated_dataset = self.generate_with_random_data_mixture(model, sample_s)
-            else:
-                generated_dataset = self.generate_imit_batch(model, sample_s, source_text, source_lengths)
+            generated_dataset = self.generate_with_beta_function_word_level_oracle(model, sample_s)
             loss = imit_kd_loss(
                 generated_dataset,
                 model,
@@ -221,86 +193,28 @@ class ImitKD(FairseqCriterion):
                 source_text,
                 self.dict,
                 self.expert_vocab_tgt,
-                self.sp_model,
-                self.bpe,
-                self.padding_idx,
                 source_lengths
             )
         return loss
 
-    def generate_with_random_data_mixture(self, student, sample):
+    def generate_with_beta_function_word_level_oracle(self, student, sample):
         with torch.no_grad():
             student = student.eval()
-            targets = sample["net_input"]["prev_output_tokens"].data.tolist()
-            max_length = max([len(i) for i in targets])  # let's avoid blowing up the GPU RAM, shall we?
-            student_generator = SequenceGenerator([student], self.dict, beam_size=1, max_len=max_length)
+            output_tokens = sample["net_input"]["prev_output_tokens"].data.tolist()
+            max_length = max([len(i) for i in output_tokens])  # let's avoid blowing up the GPU RAM, shall we?
+            student_generator = SequenceGenerator([student], self.dict, beam_size=5, max_len=max_length)
             #  same  as cutting of hypothesis at [:max_length] after generation
             student_generator.cuda()
             hypos = student_generator._generate(sample)
             dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
-            samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
+            sampling_mask = [dist.sample(sample["net_input"]["prev_output_tokens"].size()) == 1][0]
             for i, hypo in enumerate(hypos):
-                if samp_mask[i]:
-                    targets[i] = hypo[0]["tokens"].clone().detach()
-                else:
-                    targets[i] = torch.tensor(targets[i]).clone().detach()
+                hypothesis = hypo[0]["tokens"].clone().detach()
+                output_tokens[i] = torch.tensor(
+                    [hypothesis[j] if sampling_mask[i][j] else target_token for j, target_token in enumerate(hypothesis)]
+                ).detach()
             sample["net_input"]["prev_output_tokens"] = collate_tokens(
-                targets,
-                self.dict.pad(),
-                self.dict.eos(),
-                left_pad=False,
-                move_eos_to_beginning=False
-            ).detach().cuda()
-            student.train()
-        return sample
-
-    def generate_imit_batch(self, student, sample, source_text, source_lengths):
-        with torch.no_grad():
-            student = student.eval()
-            sample_expert = {
-                "id": sample["id"],
-                "net_input": {
-                    "src_tokens": source_text.cuda(),
-                    "src_lengths": source_lengths,
-                    "prev_output_tokens": sample["net_input"]["prev_output_tokens"].cuda()
-                },
-                "target": sample["target"],
-                "target_lengths": sample["target_lengths"],
-                "ntokens": sample["ntokens"],
-                "nsentences": sample["nsentences"],
-            }
-            targets = sample["net_input"]["prev_output_tokens"].data.tolist()
-            max_length = max([len(i) for i in targets])  # let's avoid blowing up the GPU RAM, shall we?
-            student_generator = SequenceGenerator([student], self.dict, beam_size=1, max_len=max_length)
-            expert_generator = SequenceGenerator([self.expert], self.expert_vocab_tgt, beam_size=1)
-            student_generator.cuda()
-            hypos = student_generator._generate(sample)
-            # using parameter , generated_length=max_length would achieve the same  as cutting of hypothesis at
-            # [:max_length] after generation, but requires dealing with token matrix instead of the dict
-            hypos_expert = expert_generator._generate(sample_expert)
-            for i, hypo in enumerate(hypos):
-                # prediction_list = hypo[0]["tokens"].tolist()
-                prediction_list = self.dict.string(
-                    utils.strip_pad(hypo[0]["tokens"], self.pad_idx), bpe_symbol='fastBPE', escape_unk=True, include_eos=False
-                ).split()
-                score = sentence_bleu(
-                    [
-                        self.dict.string(
-                            utils.strip_pad(hypos_expert[i][0]["tokens"], self.pad_idx),
-                            bpe_symbol='fastBPE',
-                            escape_unk=True,
-                            include_eos=False
-                        ).split()],
-                    prediction_list,
-                    weights=(0.1, 0.4, 0.5)
-                )
-                if score >= 0.4:
-                    # print(prediction_list, targets[i])
-                    targets[i] = hypo[0]["tokens"].clone().detach()
-                else:
-                    targets[i] = torch.tensor(targets[i]).clone().detach()
-            sample["net_input"]["prev_output_tokens"] = collate_tokens(
-                targets,
+                output_tokens,
                 self.dict.pad(),
                 self.dict.eos(),
                 left_pad=False,
