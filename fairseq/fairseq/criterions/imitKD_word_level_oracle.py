@@ -7,7 +7,6 @@ import math
 from dataclasses import dataclass, field
 import copy
 
-import sentencepiece as spm
 import fastBPE
 
 import torch
@@ -20,7 +19,6 @@ from fairseq.dataclass import FairseqDataclass
 from fairseq.checkpoint_utils import load_model_ensemble
 from fairseq.data import Dictionary
 from fairseq.sequence_generator import SequenceGenerator
-from nltk.translate.bleu_score import sentence_bleu
 
 
 @dataclass
@@ -210,16 +208,13 @@ class ImitKD(FairseqCriterion):
             sampling_mask = [dist.sample(sample["net_input"]["prev_output_tokens"].size()) == 1][0]
             for i, hypo in enumerate(hypos):
                 hypothesis = hypo[0]["tokens"].clone().detach()
-                output_tokens[i] = torch.tensor(
-                    [hypothesis[j] if sampling_mask[i][j] else target_token for j, target_token in enumerate(hypothesis)]
+                padded_hypothesis = hypothesis[0].new(1, max_length).fill_(self.pad_idx).flatten()
+                padded_hypothesis[:len(hypothesis)].copy_(hypothesis)
+                new_output_tokens = torch.tensor(
+                    [hypothesis_token if sampling_mask[i][j] else output_tokens[i][j] for j, hypothesis_token in enumerate(padded_hypothesis)]
                 ).detach()
-            sample["net_input"]["prev_output_tokens"] = collate_tokens(
-                output_tokens,
-                self.dict.pad(),
-                self.dict.eos(),
-                left_pad=False,
-                move_eos_to_beginning=False
-            ).detach().cuda()
+                output_tokens[i] = new_output_tokens[:]
+            sample["net_input"]["prev_output_tokens"] = torch.stack(output_tokens).detach().cuda()
             student.train()
         return sample
 
