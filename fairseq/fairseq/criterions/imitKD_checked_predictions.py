@@ -294,7 +294,7 @@ class ImitKD(FairseqCriterion):
                     prediction_list,
                     weights=(0.1, 0.4, 0.5)
                 )
-                if score >= 0.5:
+                if score >= 0.3:
                     # print(prediction_list, targets[i])
                     targets[i] = hypo[0]["tokens"].clone().detach()
                 else:
