@@ -319,7 +319,7 @@ class ImitKD(FairseqCriterion):
                 self.dict.eos(),
                 left_pad=False,
                 move_eos_to_beginning=False
-            ).detach().cuda()
+            ).cuda()
             student.train()
         return sample
 

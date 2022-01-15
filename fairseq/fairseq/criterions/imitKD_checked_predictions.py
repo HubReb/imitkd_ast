@@ -250,7 +250,7 @@ class ImitKD(FairseqCriterion):
                 self.dict.eos(),
                 left_pad=False,
                 move_eos_to_beginning=False
-            ).detach().cuda()
+            ).cuda()
             student.train()
         return sample
 
@@ -296,16 +296,16 @@ class ImitKD(FairseqCriterion):
                 )
                 if score >= 0.3:
                     # print(prediction_list, targets[i])
-                    targets[i] = hypo[0]["tokens"].clone().detach()
+                    targets[i] = hypo[0]["tokens"]
                 else:
-                    targets[i] = torch.tensor(targets[i]).clone().detach()
+                    targets[i] = torch.tensor(targets[i])
             sample["net_input"]["prev_output_tokens"] = collate_tokens(
                 targets,
                 self.dict.pad(),
                 self.dict.eos(),
                 left_pad=False,
                 move_eos_to_beginning=False
-            ).detach().cuda()
+            ).cuda()
             student.train()
         return sample
 
