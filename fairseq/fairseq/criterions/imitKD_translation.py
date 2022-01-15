@@ -98,83 +98,24 @@ def imit_kd_loss(
         ignore_index,
         source_lengths
 ):
-    encoded_prevs = []
-    for s in generated_dataset["net_input"]["prev_output_tokens"]:
-        encoded_prevs.append(
-            model_dict.string(utils.strip_pad(s, model_dict.pad()), bpe_symbol='fastBPE', escape_unk=True))
-    encoded_prevs = bpe.apply(encoded_prevs)
+    sample_expert = copy.deepcopy(generated_dataset)
     # print(generated_dataset.keys())
-    sample_expert = {
-        "id": generated_dataset["id"],
-        "net_input": {
-            "src_tokens": source_text.cuda(),
-            "src_lengths": source_lengths,
-            "prev_output_tokens": collate_tokens(
-                [
-                    expert_vocab_tgt.encode_line(
-                        t, add_if_not_exist=False, append_eos=True
-                    ) for t in encoded_prevs
-                ],
-                expert_vocab_tgt.pad(),
-                expert_vocab_tgt.eos(),
-                left_pad=False,
-                move_eos_to_beginning=True,
-            ).cuda()
-        },
-        "target": generated_dataset["target"],
-        "ntokens": generated_dataset["ntokens"],
-        "nsentences": generated_dataset["nsentences"],
-    }
+    encoded_prevs = generated_dataset["net_input"]["prev_output_tokens"]
+    sample_expert["net_input"]["prev_output_tokens"] = encoded_prevs.cuda()
     with torch.no_grad():
         expert_out = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=True).detach()
         expert_preds = expert_out.argmax(-1)
-        """
-        for i, t in enumerate(expert_preds):
-            print(i)
-            print("student input :" , encoded_prevs[i])
-            e = expert_vocab_tgt.string(
-                        utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True, include_eos=True 
-                )
-            print("expert prediction: ", e)
-            print(sp_model.apply([e])[0])
-            print(model_dict.string(
-                    model_dict.encode_line(
-                        sp_model.apply([e])[0].replace("<@@ /@@ s@@ >", "</s>").replace("<< unk >>", "<unk>"), add_if_not_exist=False
-                    ), bpe_symbol='fastBPE', escape_unk=True, include_eos=True
-                )
-            )
-            print("target: ", model_dict.string(generated_dataset["target"][i], bpe_symbol='fastBPE', escape_unk=True))
-        """
-        expert_preds_in_model_vocab = [
-            model_dict.encode_line(
-                sp_model.apply([
-                    expert_vocab_tgt.string(
-                        utils.strip_pad(t, expert_vocab_tgt.pad()), bpe_symbol='fastBPE', escape_unk=True, include_eos=True
-                    )]
-                )[0].replace("<@@ /@@ s@@ >", "</s>").replace("<< unk >>", "<unk>"),
-                add_if_not_exist=False,
-                )
-            for t in expert_preds
-        ]
-        preds = collate_tokens(
-            expert_preds_in_model_vocab,
-            model_dict.pad(),
-            model_dict.eos(),
-            left_pad=False,
-            move_eos_to_beginning=False
-        )
-        preds = preds.to(torch.int64).cuda()
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
-    if preds.dim() == lprobs.dim() - 1:
-        preds = preds.unsqueeze(-1)
-    if preds.shape[1] > lprobs.shape[1]:
-        preds = preds[:, :lprobs.shape[1], :]
-    imit_kd_loss_for_sample = -lprobs.gather(dim=-1, index=preds)
+    if expert_preds.dim() == lprobs.dim() - 1:
+        expert_preds = expert_preds.unsqueeze(-1)
+    imit_kd_loss_for_sample = -lprobs.gather(dim=-1, index=expert_preds)
     if ignore_index is not None:
-        pad_mask = preds.eq(ignore_index)
+        pad_mask = expert_preds.eq(ignore_index)
         imit_kd_loss_for_sample.masked_fill_(pad_mask, 0.0)
     imit_kd_loss_for_sample = imit_kd_loss_for_sample.sum()
     return imit_kd_loss_for_sample
+
+
 
 
 @register_criterion(

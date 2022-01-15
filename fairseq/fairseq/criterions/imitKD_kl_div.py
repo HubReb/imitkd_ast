@@ -54,7 +54,7 @@ class ImitKDConfig(FairseqDataclass):
         metadata={"help": "directory with expert's dictionaries"},
     )
     sp_model: str = field(
-        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/covost/en"
+        default="/home/students/hubert/covost/en"
                 "/spm_bpe8000_st_en_de.model",
         metadata={"help": "student's sentencepiece model"},
     )

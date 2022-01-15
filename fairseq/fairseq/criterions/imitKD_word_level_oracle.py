@@ -200,7 +200,7 @@ class ImitKD(FairseqCriterion):
             student = student.eval()
             output_tokens = sample["net_input"]["prev_output_tokens"].data.tolist()
             max_length = max([len(i) for i in output_tokens])  # let's avoid blowing up the GPU RAM, shall we?
-            student_generator = SequenceGenerator([student], self.dict, beam_size=5, max_len=max_length)
+            student_generator = SequenceGenerator([student], self.dict, beam_size=1, max_len=max_length)
             #  same  as cutting of hypothesis at [:max_length] after generation
             student_generator.cuda()
             hypos = student_generator._generate(sample)
