@@ -82,7 +82,7 @@ def imit_kd_loss(
         "net_input": {
             "src_tokens": source_text.cuda(),
             "src_lengths": source_lengths,
-            "prev_output_tokens": generated_dataset["net_input"]["prev_output_tokens"].cuda()
+            "prev_output_tokens": generated_dataset["net_input"]["prev_output_tokens"]
         },
         "target": generated_dataset["target"],
         "target_lengths": generated_dataset["target_lengths"],
@@ -203,7 +203,7 @@ class ImitKD(FairseqCriterion):
                 "net_input": {
                     "src_tokens": source_text.cuda(),
                     "src_lengths": source_lengths,
-                    "prev_output_tokens": sample["net_input"]["prev_output_tokens"].cuda()
+                    "prev_output_tokens": sample["net_input"]["prev_output_tokens"]
                 },
                 "target": sample["target"],
                 "target_lengths": sample["target_lengths"],
@@ -228,9 +228,10 @@ class ImitKD(FairseqCriterion):
                 padded_hypothesis[:len(hypothesis)].copy_(hypothesis)
                 padded_hypothesis_expert[:len(hypothesis_expert)].copy_(hypothesis_expert)
                 output_tokens[i] = torch.tensor(
-                    [hypothesis_token if sampling_mask[i][j] else padded_hypothesis_expert[j] for j, hypothesis_token in enumerate(padded_hypothesis)]
-                ).detach()
-            sample["net_input"]["prev_output_tokens"] = torch.stack(output_tokens).cuda()
+                    [hypothesis_token if sampling_mask[i][j] else padded_hypothesis_expert[j] for j, hypothesis_token in enumerate(padded_hypothesis)],
+                    device=torch.device('cuda:0')
+                )
+            sample["net_input"]["prev_output_tokens"] = torch.stack(output_tokens)
             student.train()
         return sample
 

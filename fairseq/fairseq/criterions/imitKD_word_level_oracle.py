@@ -211,10 +211,11 @@ class ImitKD(FairseqCriterion):
                 padded_hypothesis = hypothesis[0].new(1, max_length).fill_(self.pad_idx).flatten()
                 padded_hypothesis[:len(hypothesis)].copy_(hypothesis)
                 new_output_tokens = torch.tensor(
-                    [hypothesis_token if sampling_mask[i][j] else output_tokens[i][j] for j, hypothesis_token in enumerate(padded_hypothesis)]
+                    [hypothesis_token if sampling_mask[i][j] else output_tokens[i][j] for j, hypothesis_token in enumerate(padded_hypothesis)],
+                    device=torch.device('cuda:0')
                 )
                 output_tokens[i] = new_output_tokens[:]
-            sample["net_input"]["prev_output_tokens"] = torch.stack(output_tokens).cuda()
+            sample["net_input"]["prev_output_tokens"] = torch.stack(output_tokens)
             student.train()
         return sample
 
