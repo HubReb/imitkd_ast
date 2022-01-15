@@ -279,23 +279,22 @@ class ImitKD(FairseqCriterion):
             student = student.eval()
             student_generator = SequenceGenerator([student], self.dict, beam_size=1)
             student_generator.cuda()
-            hypos = student_generator._generate(sample)
-            targets = sample["net_input"]["prev_output_tokens"].data.tolist()
             max_length = max([len(i) for i in targets])  # let's avoid blowing up the GPU RAM, shall we?
+            student_generator = SequenceGenerator([student], self.dict, beam_size=1, max_len=max_length)
+            #  same  as cutting of hypothesis at [:max_length] after generation
+            student_generator.cuda()
+            hypos = student_generator._generate(sample)
             dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
             samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
-            for i, hypo in enumerate(hypos):
-                if samp_mask[i]:
-                    targets[i] = hypo[0]["tokens"][:max_length].clone().detach()
-                else:
-                    targets[i] = torch.tensor(targets[i]).clone().detach()
+            targets = [hypo[0]["tokens"] if samp_mask[i] else torch.tensor(targets[i], device=torch.device('cuda:0'))
+                       for i, hypo in enumerate(hypos)]
             sample["net_input"]["prev_output_tokens"] = collate_tokens(
                 targets,
                 self.dict.pad(),
                 self.dict.eos(),
                 left_pad=False,
                 move_eos_to_beginning=False
-            ).detach().cuda()
+            ).cuda()
             student.train()
         return sample
 
