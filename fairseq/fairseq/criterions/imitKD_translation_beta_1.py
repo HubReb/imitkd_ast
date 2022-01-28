@@ -91,13 +91,11 @@ def imit_kd_loss(
         generated_dataset,
         model,
         expert,
-        source_text,
         model_dict,
         expert_vocab_tgt,
         sp_model,
         bpe,
         ignore_index,
-        source_lengths
 ):
     sample_expert = copy.deepcopy(generated_dataset)
     # print(generated_dataset.keys())
@@ -118,7 +116,7 @@ def imit_kd_loss(
 
 
 @register_criterion(
-    "imit_kd_translation", dataclass=ImitKDTConfig
+    "imit_kd_translation_beta_1", dataclass=ImitKDTConfig
 )
 class ImitKD(FairseqCriterion):
     def __init__(
@@ -198,44 +196,17 @@ class ImitKD(FairseqCriterion):
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.padding_idx, reduce=reduce)
         else:
-            source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
-            generated_dataset = self.generate_imit_batch(model, sample)
             loss = imit_kd_loss(
-                generated_dataset,
+                sample,
                 model,
                 self.expert,
-                source_text,
                 self.dict,
                 self.expert_vocab_tgt,
                 self.sp_model,
                 self.bpe,
-                self.padding_idx,
-                source_lengths
+                self.padding_idx
             )
         return loss
-
-    def generate_imit_batch(self, student, sample):
-        with torch.no_grad():
-            student = student.eval()
-            targets = sample["net_input"]["prev_output_tokens"].data.tolist()
-            max_length = max([len(i) for i in targets])  # let's avoid blowing up the GPU RAM, shall we?
-            student_generator = SequenceGenerator([student], self.dict, beam_size=1, max_len=max_length)
-            #  same  as cutting of hypothesis at [:max_length] after generation
-            student_generator.cuda()
-            hypos = student_generator._generate(sample)
-            dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
-            samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
-            targets = [hypo[0]["tokens"] if samp_mask[i] else torch.tensor(targets[i], device=torch.device('cuda:0'))
-                       for i, hypo in enumerate(hypos)]
-            sample["net_input"]["prev_output_tokens"] = collate_tokens(
-                targets,
-                self.dict.pad(),
-                self.dict.eos(),
-                left_pad=False,
-                move_eos_to_beginning=False
-            ).cuda()
-            student.train()
-        return sample
 
     def compute_accuracy(self, model, net_output, sample):
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
@@ -282,33 +253,6 @@ class ImitKD(FairseqCriterion):
         to True will improves distributed training speed.
         """
         return True
-
-    def transform_source_tokens_into_expert_voc(self, sample):
-        source_text = sample["net_input"]["src_tokens"]
-        source_texts = []
-        for i, line in enumerate(source_text):
-            if type(line) == list:
-                for text in line:
-                    source_texts.append(
-                        self.expert_vocab_src.encode_line(
-                            self.bpe.apply([
-                                self.model_src_dict.string(
-                                    utils.strip_pad(text, self.dict.pad()), bpe_symbol='fastBPE', escape_unk=True)])[0],
-                            add_if_not_exist=False, append_eos=True)
-                    )
-            else:
-                source_texts.append(self.expert_vocab_src.encode_line(
-                    self.bpe.apply([self.model_src_dict.string(line, bpe_symbol='fastBPE', escape_unk=True)])[0],
-                    add_if_not_exist=False, append_eos=True))
-        source_lengths = [len(text) for text in source_texts]
-        source_text = collate_tokens(
-            source_texts,
-            self.expert_vocab_src.pad(),
-            self.expert_vocab_src.eos(),
-            left_pad=False,
-            move_eos_to_beginning=False
-        )
-        return source_text, source_lengths
 
 
 def collate_tokens(values, pad_idx, eos, left_pad, move_eos_to_beginning):
