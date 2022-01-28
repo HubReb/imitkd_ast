@@ -91,7 +91,13 @@ def imit_kd_loss(
         generated_dataset,
         model,
         expert,
-        ignore_index
+        source_text,
+        model_dict,
+        expert_vocab_tgt,
+        sp_model,
+        bpe,
+        ignore_index,
+        source_lengths
 ):
     sample_expert = copy.deepcopy(generated_dataset)
     # print(generated_dataset.keys())
@@ -192,12 +198,19 @@ class ImitKD(FairseqCriterion):
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.padding_idx, reduce=reduce)
         else:
+            source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
             generated_dataset = self.generate_imit_batch(model, sample)
             loss = imit_kd_loss(
                 generated_dataset,
                 model,
                 self.expert,
-                self.padding_idx
+                source_text,
+                self.dict,
+                self.expert_vocab_tgt,
+                self.sp_model,
+                self.bpe,
+                self.padding_idx,
+                source_lengths
             )
         return loss
 
@@ -269,6 +282,33 @@ class ImitKD(FairseqCriterion):
         to True will improves distributed training speed.
         """
         return True
+
+    def transform_source_tokens_into_expert_voc(self, sample):
+        source_text = sample["net_input"]["src_tokens"]
+        source_texts = []
+        for i, line in enumerate(source_text):
+            if type(line) == list:
+                for text in line:
+                    source_texts.append(
+                        self.expert_vocab_src.encode_line(
+                            self.bpe.apply([
+                                self.model_src_dict.string(
+                                    utils.strip_pad(text, self.dict.pad()), bpe_symbol='fastBPE', escape_unk=True)])[0],
+                            add_if_not_exist=False, append_eos=True)
+                    )
+            else:
+                source_texts.append(self.expert_vocab_src.encode_line(
+                    self.bpe.apply([self.model_src_dict.string(line, bpe_symbol='fastBPE', escape_unk=True)])[0],
+                    add_if_not_exist=False, append_eos=True))
+        source_lengths = [len(text) for text in source_texts]
+        source_text = collate_tokens(
+            source_texts,
+            self.expert_vocab_src.pad(),
+            self.expert_vocab_src.eos(),
+            left_pad=False,
+            move_eos_to_beginning=False
+        )
+        return source_text, source_lengths
 
 
 def collate_tokens(values, pad_idx, eos, left_pad, move_eos_to_beginning):

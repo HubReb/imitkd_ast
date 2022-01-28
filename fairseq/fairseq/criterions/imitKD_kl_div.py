@@ -53,12 +53,6 @@ class ImitKDConfig(FairseqDataclass):
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/wmt19.en-de.joined-dict.ensemble/",
         metadata={"help": "directory with expert's dictionaries"},
     )
-    sp_model: str = field(
-        default="/home/students/hubert/covost/en"
-                "/spm_bpe8000_st_en_de.model",
-        metadata={"help": "student's sentencepiece model"},
-    )
-
     bpe_codes: str = field(
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
         metadata={"help": "expert's bpe codes"},
@@ -90,7 +84,6 @@ def imit_kd_loss(
         source_text,
         model_dict,
         expert_vocab_tgt,
-        sp_model,
         bpe,
         ignore_index,
         source_lengths
@@ -210,7 +203,6 @@ class ImitKD(FairseqCriterion):
             expert_vocab_tgt,
             path,
             beta,
-            sp_model,
             bpe_codes,
             data_mix_rate,
             ignore_prefix_size=0,
@@ -232,9 +224,6 @@ class ImitKD(FairseqCriterion):
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
         self.beta = beta
-        self.sp_model = spm.SentencePieceProcessor()
-        self.sp_model.Load(sp_model)
-        self.sp_model.requires_grad = False
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
@@ -291,7 +280,6 @@ class ImitKD(FairseqCriterion):
                 source_text,
                 self.dict,
                 self.expert_vocab_tgt,
-                self.sp_model,
                 self.bpe,
                 self.padding_idx,
                 source_lengths
