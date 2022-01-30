@@ -950,15 +950,15 @@ class Trainer(object):
             )
 
         metrics.log_stop_time("train_wall")
+
         try:
             if self.criterion.beta:
                 t = self.get_num_updates()
-                self.criterion.beta = 200 ** (-(t / self.cfg.optimization.max_update))
-
-                # if t > self.cfg.model.warmup_updates:       # original if t/self.cfg.optimization.max_update > warmup_updates - which is utter nonsense!
-                    # self.criterion.beta = 200 ** (-(t / (self.cfg.optimization.max_update - self.cfg.warmup_updates)))
-                # else:
-                    # self.criterion.beta = 1
+                # self.criterion.beta = 200 ** (-(t / self.cfg.optimization.max_update))
+                if t/self.cfg.optimization.max_update > self.criterion.warmup:       # original if t/self.cfg.optimization.max_update > warmup_updates - which is utter nonsense!
+                   self.criterion.beta = 200 ** (-(t / self.cfg.optimization.max_update - self.criterion.warmup))
+                else:
+                   self.criterion.beta = 1
                 # self.criterion.beta =  1 / (1 + np.exp((t / self.cfg.optimization.max_update - 0.5) * 20))
         except AttributeError:
             pass

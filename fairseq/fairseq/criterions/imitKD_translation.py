@@ -30,6 +30,9 @@ class ImitKDTConfig(FairseqDataclass):
         default=False,
         metadata={"help": "report accuracy metric"},
     )
+    warmup: float = field(
+            default=0.0
+    )
     ignore_prefix_size: int = field(
         default=0,
         metadata={"help": "Ignore first N tokens"},
@@ -128,6 +131,7 @@ class ImitKD(FairseqCriterion):
             data_mix_rate,
             model_vocab_src,
             model_vocab_tgt,
+            warmup,
             ignore_prefix_size=0,
             report_accuracy=False,
     ):
@@ -149,6 +153,7 @@ class ImitKD(FairseqCriterion):
         self.sentence_avg = False
         self.beta = beta
         self.sp_model = fastBPE.fastBPE(bpe_codes_model, model_vocab_tgt)
+        self.warmup = warmup
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
