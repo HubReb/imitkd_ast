@@ -40,6 +40,9 @@ class ImitKDConfig(FairseqDataclass):
         default=1,
         metadata={"help": "replacement prop"},
     )
+    warmup: float = field(
+            default=0.0
+    )
 
     expert_vocab_tgt: str = field(
         default="wmt19.en-de.joined-dict.ensemble/dict.de.txt",
@@ -205,6 +208,7 @@ class ImitKD(FairseqCriterion):
             beta,
             bpe_codes,
             data_mix_rate,
+            warmup,
             ignore_prefix_size=0,
             report_accuracy=False,
     ):
@@ -224,6 +228,8 @@ class ImitKD(FairseqCriterion):
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
         self.beta = beta
+        self.warmup = warmup
+
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
