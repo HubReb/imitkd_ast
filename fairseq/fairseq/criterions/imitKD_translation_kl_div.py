@@ -218,8 +218,19 @@ class ImitKD(FairseqCriterion):
             hypos = student_generator._generate(sample)
             dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
             samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
-            targets = [hypo[0]["tokens"] if samp_mask[i] else torch.tensor(targets[i], device=torch.device('cuda:0'))
-                       for i, hypo in enumerate(hypos)]
+            for i, h in enumerate(hypos):
+                if samp_mask[i]:
+                    if h[0]["tokens"][-1] != self.dict.eos():
+                        targets[i] = torch.tensor([self.dict.eos()] + h[0]["tokens"].tolist())
+                    else:
+                        hypo = h[0]["tokens"].tolist()
+                        targets[i] = torch.tensor([hypo[-1]] + hypo[1:-1])
+                else:
+                    targets[i] = torch.tensor(targets[i])
+            # targets = [hypo[0]["tokens"] if samp_mask[i] else torch.tensor(targets[i], device=torch.device('cuda:0'))
+                       # for i, hypo in enumerate(hypos)]
+            # targets = torch.tensor(targets, device=torch.device("cuda:0"))
+            # print(hypos[0][0]["tokens"], targets[0])
             sample["net_input"]["prev_output_tokens"] = collate_tokens(
                 targets,
                 self.dict.pad(),
@@ -248,7 +259,7 @@ class ImitKD(FairseqCriterion):
         sample_size = sum(log.get("sample_size", 0) for log in logging_outputs)
 
         metrics.log_scalar(
-            "loss", loss_sum / sample_size / math.log(2), sample_size, round=3
+            "loss", loss_sum , sample_size, round=3
         )
 
         total = utils.item(sum(log.get("total", 0) for log in logging_outputs))
