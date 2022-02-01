@@ -7,10 +7,12 @@ import math
 from dataclasses import dataclass, field
 import copy
 
+import sentencepiece as spm
 import fastBPE
 
 import torch
 from torch.distributions import Categorical
+from torch.nn.functional import kl_div
 
 from fairseq import metrics, utils
 from fairseq.criterions import FairseqCriterion, register_criterion
@@ -21,7 +23,7 @@ from fairseq.sequence_generator import SequenceGenerator
 
 
 @dataclass
-class ImitKDTConfig(FairseqDataclass):
+class ImitKDConfig(FairseqDataclass):
     expert: str = field(
         default="checkpoint_best.pt",
         metadata={"help": "NMT model to use as expert"},
@@ -29,9 +31,6 @@ class ImitKDTConfig(FairseqDataclass):
     report_accuracy: bool = field(
         default=False,
         metadata={"help": "report accuracy metric"},
-    )
-    warmup: float = field(
-            default=0.0
     )
     ignore_prefix_size: int = field(
         default=0,
@@ -58,21 +57,9 @@ class ImitKDTConfig(FairseqDataclass):
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
         metadata={"help": "expert's bpe codes"},
     )
-    bpe_codes_model: str = field(
-        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
-        metadata={"help": "models's bpe codes"},
-    )
-    model_vocab_src: str = field(
-        default="/scratch/hubert/knn_ast_kd_nmt/fairseq/examples/translation/data-bin/MUST_source/dict.en.txt",
-        metadata={"help": "vocab file for ast model input"},
-    )
-    model_vocab_tgt: str = field(
-        default="/scratch/hubert/knn_ast_kd_nmt/fairseq/examples/translation/data-bin/MUST_source/dict.de.txt",
-        metadata={"help": "vocab file for ast model output"},
-    )
     data_mix_rate: int = field(
         default=1,
-        metadata={"help": "number of step to run before updating the model's parameters"},
+        metadata={"help": "number of step to run before updating the model;s parameters"},
     )
 
 
@@ -93,14 +80,37 @@ def valid_loss(lprobs, target, ignore_index=None, reduce=True):
 def imit_kd_loss(
         generated_dataset,
         model,
-        model_dict,
         expert,
-        ignore_index
+        source_text,
+        model_dict,
+        expert_vocab_tgt,
+        bpe,
+        ignore_index,
+        source_lengths
 ):
-    sample_expert = copy.deepcopy(generated_dataset)
-    # print(generated_dataset.keys())
-    encoded_prevs = generated_dataset["net_input"]["prev_output_tokens"]
-    sample_expert["net_input"]["prev_output_tokens"] = encoded_prevs.cuda()
+    """
+    encoded_prevs = []
+    for s in generated_dataset["net_input"]["prev_output_tokens"]:
+        encoded_prevs.append(model_dict.string(utils.strip_pad(s, model_dict.pad()),
+                                               bpe_symbol='sentencepiece_fastBPE',
+                                               escape_unk=True,
+                                               include_eos=False
+                                               )
+                             )
+    encoded_prevs = bpe.apply(encoded_prevs)
+    """
+    sample_expert = {
+        "id": generated_dataset["id"],
+        "net_input": {
+            "src_tokens": source_text.cuda(),
+            "src_lengths": source_lengths,
+            "prev_output_tokens": generated_dataset["net_input"]["prev_output_tokens"].cuda()
+        },
+        "target": generated_dataset["target"],
+        "target_lengths": generated_dataset["target_lengths"],
+        "ntokens": generated_dataset["ntokens"],
+        "nsentences": generated_dataset["nsentences"],
+    }
     with torch.no_grad():
         expert_out = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=False)
         # expert_preds = expert_out.argmax(-1)
@@ -115,7 +125,7 @@ def imit_kd_loss(
 
 
 @register_criterion(
-    "imit_kd_translation_kl_div", dataclass=ImitKDTConfig
+    "imit_kd_CE", dataclass=ImitKDConfig
 )
 class ImitKD(FairseqCriterion):
     def __init__(
@@ -127,24 +137,19 @@ class ImitKD(FairseqCriterion):
             path,
             beta,
             bpe_codes,
-            bpe_codes_model,
             data_mix_rate,
-            model_vocab_src,
-            model_vocab_tgt,
-            warmup,
             ignore_prefix_size=0,
             report_accuracy=False,
     ):
         super().__init__(task)
         self.ignore_prefix_size = ignore_prefix_size
-        self.report_accuracy = report_accuracy
         self.data_mix_rate = data_mix_rate
+        self.report_accuracy = report_accuracy
         self.expert, _ = load_model_ensemble([expert], arg_overrides={"data": path})
         self.expert = self.expert[-1]
         self.expert = self.expert.eval()
         self.expert_vocab_src = Dictionary.load(expert_vocab_src)
         self.expert_vocab_tgt = Dictionary.load(expert_vocab_tgt)
-        self.model_src_dict = Dictionary.load(model_vocab_src)
         self.expert.requires_grad = False
         self.dict = task.tgt_dict
         self.eos = self.dict.eos()
@@ -152,8 +157,6 @@ class ImitKD(FairseqCriterion):
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
         self.beta = beta
-        self.sp_model = fastBPE.fastBPE(bpe_codes_model, model_vocab_tgt)
-        self.warmup = warmup
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
@@ -163,7 +166,9 @@ class ImitKD(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        net_output = model(**sample["net_input"])
+        sample_s = copy.deepcopy(sample)
+        sample_s["net_input"].pop("src_text", None)
+        net_output = model(**sample_s["net_input"])
         loss = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
         sample_size = (
             sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
@@ -197,19 +202,28 @@ class ImitKD(FairseqCriterion):
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.padding_idx, reduce=reduce)
         else:
-            generated_dataset = self.generate_imit_batch(model, sample)
+            source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
+            sample_s = copy.deepcopy(sample)
+            sample_s["net_input"].pop("src_text", None)
+            generated_dataset = self.generate_imit_batch(model, sample_s)
             loss = imit_kd_loss(
                 generated_dataset,
                 model,
-                self.dict,
                 self.expert,
-                self.padding_idx
+                source_text,
+                self.dict,
+                self.expert_vocab_tgt,
+                self.bpe,
+                self.padding_idx,
+                source_lengths
             )
         return loss
 
     def generate_imit_batch(self, student, sample):
         with torch.no_grad():
             student = student.eval()
+            student_generator = SequenceGenerator([student], self.dict, beam_size=1)
+            student_generator.cuda()
             targets = sample["net_input"]["prev_output_tokens"].data.tolist()
             max_length = max([len(i) for i in targets])  # let's avoid blowing up the GPU RAM, shall we?
             student_generator = SequenceGenerator([student], self.dict, beam_size=1, max_len=max_length)
@@ -227,10 +241,6 @@ class ImitKD(FairseqCriterion):
                         targets[i] = torch.tensor([hypo[-1]] + hypo[1:-1])
                 else:
                     targets[i] = torch.tensor(targets[i])
-            # targets = [hypo[0]["tokens"] if samp_mask[i] else torch.tensor(targets[i], device=torch.device('cuda:0'))
-                       # for i, hypo in enumerate(hypos)]
-            # targets = torch.tensor(targets, device=torch.device("cuda:0"))
-            # print(hypos[0][0]["tokens"], targets[0])
             sample["net_input"]["prev_output_tokens"] = collate_tokens(
                 targets,
                 self.dict.pad(),
@@ -261,6 +271,7 @@ class ImitKD(FairseqCriterion):
         metrics.log_scalar(
             "loss", loss_sum / sample_size / math.log(2), sample_size, round=3
         )
+
         total = utils.item(sum(log.get("total", 0) for log in logging_outputs))
         if total > 0:
             metrics.log_scalar("total", total)
@@ -285,6 +296,33 @@ class ImitKD(FairseqCriterion):
         to True will improves distributed training speed.
         """
         return True
+
+    def transform_source_tokens_into_expert_voc(self, sample):
+        source_text = sample["net_input"]["src_text"]
+        source_texts = []
+        for line in source_text:
+            if isinstance(line, list):
+                for text in line:
+                    source_texts.append(self.expert_vocab_src.encode_line(
+                        self.bpe.apply([text])[0],
+                        add_if_not_exist=False,
+                        append_eos=True)
+                    )
+            else:
+                source_texts.append(self.expert_vocab_src.encode_line(
+                    self.bpe.apply([line])[0],
+                    add_if_not_exist=False,
+                    append_eos=True)
+                )
+        src_lengths = [len(text) for text in source_texts]
+        source_text = collate_tokens(
+            source_texts,
+            self.expert_vocab_src.pad(),
+            self.expert_vocab_src.eos(),
+            left_pad=False,
+            move_eos_to_beginning=False
+        )
+        return source_text, src_lengths
 
 
 def collate_tokens(values, pad_idx, eos, left_pad, move_eos_to_beginning):
