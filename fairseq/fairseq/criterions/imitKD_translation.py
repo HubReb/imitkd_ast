@@ -217,8 +217,15 @@ class ImitKD(FairseqCriterion):
             hypos = student_generator._generate(sample)
             dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
             samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
-            targets = [hypo[0]["tokens"] if samp_mask[i] else torch.tensor(targets[i], device=torch.device('cuda:0'))
-                       for i, hypo in enumerate(hypos)]
+            for i, h in enumerate(hypos):
+                if samp_mask[i]:
+                    if h[0]["tokens"][-1] != self.dict.eos():
+                        targets[i] = torch.tensor([self.dict.eos()] + h[0]["tokens"].tolist())
+                    else:
+                        hypo = h[0]["tokens"].tolist()
+                        targets[i] = torch.tensor([hypo[-1]] + hypo[1:-1])
+                else:
+                    targets[i] = torch.tensor(targets[i])
             sample["net_input"]["prev_output_tokens"] = collate_tokens(
                 targets,
                 self.dict.pad(),
