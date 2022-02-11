@@ -145,7 +145,6 @@ class BerardModel(FairseqEncoderDecoderModel):
                 component=encoder, checkpoint=args.load_pretrained_encoder_from
             )
         encoder.encoder_freezing_updates = args.encoder_freezing_updates
-
         return encoder
 
     @classmethod

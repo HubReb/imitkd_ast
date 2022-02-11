@@ -136,7 +136,7 @@ class ImitKD(FairseqCriterion):
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
         self.beta = beta
-        self.asr_model, _ = load_model_ensemble([asr_model], arg_overrides={"data": path_asr_model})
+        self.asr_model, _ = load_model_ensemble([asr_model], arg_overrides={"data": path_asr_model, "encoder_freezing_updates": 0})
         self.asr_model = self.asr_model[-1]
         self.asr_model = self.asr_model.eval()
 
