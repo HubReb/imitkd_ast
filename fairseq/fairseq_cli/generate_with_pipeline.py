@@ -86,6 +86,8 @@ def _main(cfg: DictConfig, output_file):
     # Set dictionaries
     try:
         src_dict = getattr(task, "source_dictionary", None)
+        if getattr(task, "dummy_vocab", None):
+            src_dict = None
     except NotImplementedError:
         src_dict = None
     tgt_dict = task.target_dictionary
@@ -174,7 +176,7 @@ def _main(cfg: DictConfig, output_file):
     from fairseq.checkpoint_utils import load_model_ensemble
     nmt_model, _ = load_model_ensemble(
         ["/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/translation/data-bin/"
-         "nmt_transformer_covost_label_smoothed_cross_entropy/checkpoint_11k_patience_run_out.avg10.pt"],
+         "nmt_covost_label_smoothed_cross_entropy/checkpoint_best.pt"],
         arg_overrides={
             "data": "/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/wmt19.en-de.joined-dict.ensemble/",
             "knn_keytype": "last_ffn_input"
@@ -218,23 +220,11 @@ def _main(cfg: DictConfig, output_file):
             constraints = sample["constraints"]
 
         gen_timer.start()
-
-        sample_s = {
-            "id": sample["id"],
-            "net_input": {
-                "src_tokens": sample["net_input"]["src_tokens"],
-                "src_lengths": sample["net_input"]["src_lengths"],
-                "prev_output_tokens": sample["net_input"]["prev_output_tokens"]
-            },
-            "target": sample["target"],
-            "target_lengths": sample["target_lengths"],
-            "ntokens": sample["ntokens"],
-            "nsentences": sample["nsentences"],
-        }
+        sample["net_input"].pop("src_text", None)
         hypos = task.inference_step(
             generator,
             models,
-            sample_s,
+            sample,
             prefix_tokens=prefix_tokens,
             constraints=constraints,
         )
@@ -259,7 +249,7 @@ def _main(cfg: DictConfig, output_file):
             "id": sample["id"],
             "net_input": {
                 "src_tokens": expert_input.cuda(),
-                "src_lengths": [len(text) for text in source_texts],
+                "src_lengths": torch.tensor([len(text) for text in source_texts]),
                 "prev_output_tokens": [],
             },
             "target": sample["target"],

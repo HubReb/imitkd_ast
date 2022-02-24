@@ -90,6 +90,8 @@ def _main(cfg: DictConfig, output_file):
     # Set dictionaries
     try:
         src_dict = getattr(task, "source_dictionary", None)
+        if getattr(task, "dummy_vocab", None):
+            src_dict = None
     except NotImplementedError:
         src_dict = None
     tgt_dict = task.target_dictionary

@@ -129,6 +129,10 @@ class SpeechToTextTask(LegacyFairseqTask):
     def source_dictionary(self):
         return self.tgt_dict
 
+    @property
+    def dummy_vocab(self):
+        return True
+
     def max_positions(self):
         return self.args.max_source_positions, self.args.max_target_positions
 
