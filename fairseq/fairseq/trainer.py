@@ -818,13 +818,11 @@ class Trainer(object):
                     # check local gradnorm single GPU case, trigger NanDetector
                     raise FloatingPointError("gradients are Nan/Inf")
             try:
-                # if we use Imitation Learning KD we only update model parameter every x steps
-                if self.get_num_updates() % self.criterion.data_mix_rate == 0:
-                    with torch.autograd.profiler.record_function("optimizer"):
-                        # take an optimization step
-                        self.task.optimizer_step(
-                            self.optimizer, model=self.model, update_num=self.get_num_updates()
-                        )
+                with torch.autograd.profiler.record_function("optimizer"):
+                    # take an optimization step
+                    self.task.optimizer_step(
+                        self.optimizer, model=self.model, update_num=self.get_num_updates()
+                    )
             except AttributeError:
                 with torch.autograd.profiler.record_function("optimizer"):
                     # take an optimization step
