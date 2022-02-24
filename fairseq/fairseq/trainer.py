@@ -680,12 +680,7 @@ class Trainer(object):
         self._set_seed()
         self.model.train()
         self.criterion.train()
-        try:
-            # we use Imitation learning KD and don't want to update at every step for speed up
-            if self.get_num_updates() % self.criterion.data_mix_rate == 0:
-                self.zero_grad()
-        except AttributeError:
-            self.zero_grad()
+        self.zero_grad()
 
         metrics.log_start_time("train_wall", priority=800, round=0)
 
