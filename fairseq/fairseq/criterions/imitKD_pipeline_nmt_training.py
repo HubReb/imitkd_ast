@@ -198,7 +198,7 @@ class ImitKD(FairseqCriterion):
             prev_output_tokens = sample["net_input"]["prev_output_tokens"].data.tolist()
             max_length = max([len(i) for i in prev_output_tokens])  # let's avoid blowing up the GPU RAM, shall we?
             student_generator = SequenceGenerator([student], self.dict, beam_size=1, max_len=max_length)
-            asr_generator = SequenceGenerator([self.asr_model], self.dict, beam_size=1)
+            asr_generator = SequenceGenerator([self.asr_model], self.dict, beam_size=1, max_len=max_length)
             student_generator.cuda()
             sample["net_input"].pop("src_text", None)
             transcription_hypos = asr_generator._generate(sample)
@@ -215,7 +215,7 @@ class ImitKD(FairseqCriterion):
                 move_eos_to_beginning=False
             ).cuda()
             sample["net_input"]["src_tokens"] = transcriptions.cuda()
-            sample["net_input"]["src_lengths"] = lengths
+            sample["net_input"]["src_lengths"] = torch.tensor(lengths, device="cuda")
             student_hypos = student_generator._generate(sample)
             dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
             samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
