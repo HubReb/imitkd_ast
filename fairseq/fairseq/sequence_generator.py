@@ -414,7 +414,7 @@ class SequenceGenerator(nn.Module):
                                 #print(knn_scores)
                                 #print(knn_scores[inds])
                             lprobs = knn_scores
- 
+
             lprobs[lprobs != lprobs] = torch.tensor(-math.inf).to(lprobs)
 
             lprobs[:, self.pad] = -math.inf  # never select pad
