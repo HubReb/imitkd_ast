@@ -198,7 +198,7 @@ class ImitKD(FairseqCriterion):
             sample["net_input"].pop("src_text")
             max_length = max([len(i) for i in prev_output_tokens])  # let's avoid blowing up the GPU RAM, shall we?
             student_generator = SequenceGenerator([student], self.dict, beam_size=1, max_len=max_length)
-            asr_generator = SequenceGenerator([self.asr_model], self.dict, beam_size=1)
+            asr_generator = SequenceGenerator([self.asr_model], self.dict, beam_size=1, max_len=max_length)
             student_generator.cuda()
             student_hypos = student_generator._generate(sample)
             transcription_hypos = asr_generator._generate(sample)
