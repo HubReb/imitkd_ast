@@ -304,6 +304,22 @@ def _main(cfg: DictConfig, output_file):
             constraints = sample["constraints"]
 
         gen_timer.start()
+        """
+        sample_s= {
+            "id": sample["id"],
+            "net_input" : { 
+            "src_tokens": sample["net_input"]["src_tokens"],
+            "src_lengths":sample["net_input"]["src_lengths"],
+            "prev_output_tokens": sample["net_input"]["prev_output_tokens"]
+            },
+            "target": sample["target"],
+            "target_lengths": sample["target_lengths"],
+            "ntokens": sample["ntokens"],
+            "nsentences": sample["nsentences"],
+            }
+        """
+        if sample["net_input"].get("src_text"):
+            sample["net_input"].pop("src_text")
         hypos = task.inference_step(
             generator,
             models,

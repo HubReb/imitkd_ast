@@ -179,6 +179,7 @@ class ImitKDAST(FairseqCriterion):
                 left_pad=False,
                 move_eos_to_beginning=False
             ).cuda()
+        student = student.train()
         return sample
 
     def compute_accuracy(self, model, net_output, sample):
