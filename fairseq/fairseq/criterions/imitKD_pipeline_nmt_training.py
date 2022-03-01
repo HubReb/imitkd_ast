@@ -90,17 +90,11 @@ def imit_kd_loss(
     sample_expert["net_input"]["src_tokens"] = source_texts.cuda()
     sample_expert["net_input"]["src_lengths"] = source_lengths
     with torch.no_grad():
-        expert_out = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=True)
-        expert_preds = expert_out.argmax(-1)
+        expert_logits = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=False)
+        pad_mask = expert_logits.eq(ignore_index)
+        expert_logits.masked_fill_(pad_mask, 0.0)
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
-    if expert_preds.dim() == lprobs.dim() - 1:
-        expert_preds = expert_preds.unsqueeze(-1)
-    imit_kd_loss_for_sample = -lprobs.gather(dim=-1, index=expert_preds)
-    if ignore_index is not None:
-        pad_mask = expert_preds.eq(ignore_index)
-        imit_kd_loss_for_sample.masked_fill_(pad_mask, 0.0)
-    imit_kd_loss_for_sample = imit_kd_loss_for_sample.sum()
-    return imit_kd_loss_for_sample
+    return -torch.sum(expert_logits * lprobs)
 
 
 @register_criterion(
@@ -214,7 +208,7 @@ class ImitKD(FairseqCriterion):
                 left_pad=False,
                 move_eos_to_beginning=False
             ).cuda()
-            sample["net_input"]["src_tokens"] = transcriptions.cuda()
+            sample["net_input"]["src_tokens"] = transcriptions
             sample["net_input"]["src_lengths"] = torch.tensor(lengths, device="cuda")
             student_hypos = student_generator._generate(sample)
             dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
