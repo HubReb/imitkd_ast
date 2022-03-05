@@ -103,19 +103,17 @@ def imit_kd_loss(
         "nsentences": generated_dataset["nsentences"],
     }
     with torch.no_grad():
-        expert_logits = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=True).detach()
-    generated_dataset["net_input"].pop("src_text", None)
+        expert_out = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=False)
+        # expert_preds = expert_out.argmax(-1)
+        pad_mask = expert_out.eq(model_dict.pad())
+        expert_out.masked_fill_(pad_mask, 0.0)
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
-    pad_mask = (lprobs == model_dict.pad())
-    lprobs = lprobs[~pad_mask]
-    pad_mask = (expert_logits == expert_vocab_tgt.pad())
-    expert_logits = expert_logits[~pad_mask]
-    kl_loss = kl_div(lprobs, expert_logits, reduction="sum", log_target=True)
-    # if ignore_index is not None:
-    # pad_mask = preds.eq(ignore_index)
-    # imit_kd_loss_for_sample.masked_fill_(pad_mask, 0.0)
-    # imit_kd_loss_for_sample = imit_kd_loss_for_sample.sum()
-    return kl_loss
+    # pad_mask = lprobs.eq(model_dict.pad())
+    # lprobs.masked_fill_(pad_mask, 0.0)
+    # kl_loss = kl_div(lprobs, expert_out, reduction="batchmean", log_target=True)
+    # good old CE
+    return -torch.sum(expert_out * lprobs)
+
 
 
 @register_criterion(
