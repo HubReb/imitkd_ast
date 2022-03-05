@@ -90,6 +90,8 @@ def _main(cfg: DictConfig, output_file):
     # Set dictionaries
     try:
         src_dict = getattr(task, "source_dictionary", None)
+        if getattr(task, "dummy_vocab", None):
+            src_dict = None
     except NotImplementedError:
         src_dict = None
     tgt_dict = task.target_dictionary
@@ -353,7 +355,7 @@ def _main(cfg: DictConfig, output_file):
             constraints = sample["constraints"]
 
         gen_timer.start()
-
+        source_text = sample["net_input"]["src_text"]
         if sample["net_input"].get("src_text"):
             sample['net_input'].pop("src_text")
         hypos = task.inference_step(
@@ -373,15 +375,12 @@ def _main(cfg: DictConfig, output_file):
             keys = np.zeros([saving, model.decoder.embed_dim], dtype=np.float32)
             addids = np.zeros([saving], dtype=np.int)
             save_idx = 0
-        source_text = sample["net_input"]["src_text"]
         source_texts = []
         for i, line in enumerate(source_text):
             if type(line) == list:
                 for text in line:
                     source_texts.append(expert_vocab_src.encode_line(bpe_expert_src([text])[0], add_if_not_exist=False, append_eos=True))
             else:
-                if line is None:
-                    print(task.tgt_dict.string(sample['target'][i], bpe_symbol="fastBPE"))
                 source_texts.append(expert_vocab_src.encode_line(bpe_expert_src.apply([line])[0], add_if_not_exist=False, append_eos=True))
         source_texts = collate_tokens(
             source_texts,
@@ -394,6 +393,8 @@ def _main(cfg: DictConfig, output_file):
         for b, hyp in enumerate(hypos):
             # consider only the top scoring hypothesis
             t = int(uniform(low=1, high=len(hyp[0]["tokens"]), size=None))
+            print(source_text[b])
+            print(task.tgt_dict.string(utils.strip_pad(hyp[0]["tokens"].clone().detach(), expert_vocab_src.pad()), bpe_symbol="fastBPE"))
             #t = 2
             prev_output_tokens.append(
                 hyp[0]["tokens"][:t].clone().detach()

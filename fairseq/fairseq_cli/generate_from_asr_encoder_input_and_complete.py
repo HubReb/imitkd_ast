@@ -177,6 +177,9 @@ def _main(cfg: DictConfig, output_file):
     expert, _ = load_model_ensemble(["/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/wmt19.en-de.joined-dict"
                                      ".ensemble/model1.pt"], arg_overrides={"data": "/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/wmt19.en-de.joined-dict.ensemble/", "knn_keytype": "last_ffn_input"})
     expert = expert[-1].cuda()
+    st_model, _ = load_model_ensemble(["/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/mustc_st_transformer.pt"],
+            arg_overrides={"data": "/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/MUST/en-de/", "knn_keytype": "last_ffn_input", "load_pretrained_encoder_from": "/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/mustc_st_transformer.pt"})
+    st_model = st_model[-1].cuda()
     from fairseq.sequence_generator import SequenceGenerator
     from fairseq.data import Dictionary
     bpe_expert_src = fastBPE.fastBPE(
@@ -186,6 +189,7 @@ def _main(cfg: DictConfig, output_file):
     expert_vocab_tgt = Dictionary.load("wmt19.en-de.joined-dict.ensemble/dict.de.txt")
     expert_vocab_src = Dictionary.load("wmt19.en-de.joined-dict.ensemble/dict.en.txt")
     expert_generator = SequenceGenerator([expert], expert_vocab_tgt, beam_size=1)
+    st_generator = SequenceGenerator([st_model], expert_vocab_tgt, beam_size=1)
 
     def decode_fn(x):
         if bpe is not None:
@@ -237,6 +241,7 @@ def _main(cfg: DictConfig, output_file):
         num_generated_tokens = sum(len(h[0]["tokens"]) for h in hypos)
         gen_timer.stop(num_generated_tokens)
         source_texts = []
+        source_text = sample["net_input"]["src_text"]
         for b, hyp in enumerate(hypos):
             print(sample["net_input"]["src_text"][b])
             print(task.tgt_dict.string(utils.strip_pad(hyp[0]["tokens"].clone().detach(), expert_vocab_src.pad()), bpe_symbol="fastBPE"))
@@ -244,7 +249,12 @@ def _main(cfg: DictConfig, output_file):
                 [task.tgt_dict.string(utils.strip_pad(hyp[0]["tokens"].clone().detach(), expert_vocab_src.pad()), bpe_symbol="fastBPE")])[0],
                                                              add_if_not_exist=False,
                                                              append_eos=True)
-                                )
+             )
+        sample["net_input"].pop("src_text", None)
+        hypos = st_generator.generate(
+            [st_model],
+            sample,
+        )
         expert_input = collate_tokens(
             source_texts,
             expert_vocab_tgt.pad(),
@@ -252,21 +262,40 @@ def _main(cfg: DictConfig, output_file):
             left_pad=False,
             move_eos_to_beginning=False
         ).to(torch.int64).detach().cuda()
+        prev_output_tokens = []
+        for b, hyp in enumerate(hypos):
+            # consider only the top scoring hypothesis
+            t = int(uniform(low=1, high=len(hyp[0]["tokens"]), size=None))
+            print(source_text[b])
+            print(task.tgt_dict.string(utils.strip_pad(hyp[0]["tokens"].clone().detach(), expert_vocab_src.pad()), bpe_symbol="fastBPE"))
+            #t = 2
+            prev_output_tokens.append(
+                hyp[0]["tokens"][:t].clone().detach()
+            )
+        prev_output_tokens = collate_tokens(
+            prev_output_tokens,
+            expert_vocab_tgt.pad(),
+            expert_vocab_tgt.eos(),
+            left_pad=False,
+            move_eos_to_beginning=False
+        )
         out = {
             "id": sample["id"],
             "net_input": {
-                "src_tokens": expert_input.cuda(),
+                "src_tokens": expert_input,
                 "src_lengths": [len(text) for text in source_texts],
-                "prev_output_tokens": [],
+                "prev_output_tokens": prev_output_tokens
             },
             "target": sample["target"],
             "target_lengths": sample["target_lengths"],
             "ntokens": sample["ntokens"],
             "nsentences": sample["nsentences"],
             }
+
         hypos = expert_generator.generate(
             [expert],
-            out
+            out,
+            prefix_tokens=prev_output_tokens.cuda(),
         )
         for b, hypo in enumerate(hypos):
             for k in range(cfg.generation.nbest):

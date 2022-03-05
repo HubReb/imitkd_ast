@@ -175,7 +175,8 @@ def _main(cfg: DictConfig, output_file):
     bpe = task.build_bpe(cfg.bpe)
     from fairseq.checkpoint_utils import load_model_ensemble
     asr_model, _ = load_model_ensemble(
-        "home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/model_asr_transformer_covost_wmt19_vocab_processed_texts/avg_last_10_checkpoint.pt",
+        ["/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/model_asr_berard_covost_wmt19_vocab/checkpoint_best.pt"],
+        # ["/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/model_asr_transformer_covost_wmt19_vocab_processed_texts/avg_last_10_checkpoint.pt"],
     )
     asr_model = asr_model[-1].cuda()
     from fairseq.sequence_generator import SequenceGenerator
@@ -228,6 +229,7 @@ def _main(cfg: DictConfig, output_file):
             "ntokens": sample["ntokens"],
             "nsentences": sample["nsentences"],
         }
+        sample["net_input"].pop("src_text", None)
         hypos = expert_generator.generate(
             [asr_model],
             sample
@@ -253,7 +255,7 @@ def _main(cfg: DictConfig, output_file):
             "id": sample["id"],
             "net_input": {
                 "src_tokens": nmt_input.cuda(),
-                "src_lengths": [len(text) for text in source_texts],
+                "src_lengths": torch.tensor([len(text) for text in source_texts], device="cuda"),
                 "prev_output_tokens": [],
             },
             "target": sample["target"],
