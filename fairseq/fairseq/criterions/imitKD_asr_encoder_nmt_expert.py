@@ -142,10 +142,12 @@ class ImitKD(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
+        original_sample = copy.deepcopy(sample)
+        with torch.no_grad():
+            original_net_output = model(**sample["net_input"])
         if valid:
             sample["net_input"].pop("src_text", None)
-            net_output = model(**sample["net_input"])
-            loss = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
+            loss = self.compute_loss(model, original_net_output, sample, reduce=reduce, valid=valid)
         else:
             sample, asr_transcriptions, source_lengths = self.generate_imit_batch(model, sample)
             sample_s = copy.deepcopy(sample)
@@ -162,7 +164,7 @@ class ImitKD(FairseqCriterion):
             "sample_size": sample_size,
         }
         if self.report_accuracy:
-            n_correct, total = self.compute_accuracy(model, net_output, sample)
+            n_correct, total = self.compute_accuracy(model, original_net_output, original_sample)
             logging_output["n_correct"] = utils.item(n_correct.data)
             logging_output["total"] = utils.item(total.data)
         return loss, sample_size, logging_output
@@ -261,7 +263,7 @@ class ImitKD(FairseqCriterion):
             )
             metrics.log_scalar("n_correct", n_correct)
             metrics.log_derived(
-                "translation accuracy",
+                "accuracy",
                 lambda meters: round(
                     meters["n_correct"].sum * 100.0 / meters["total"].sum, 3
                 )
