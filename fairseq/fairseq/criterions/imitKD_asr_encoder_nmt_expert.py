@@ -149,7 +149,7 @@ class ImitKD(FairseqCriterion):
             sample, asr_transcriptions, source_lengths = self.generate_imit_batch(model, sample)
             sample_s = copy.deepcopy(sample)
             sample_s["net_input"].pop("src_text", None)
-        net_output = model(**sample_s["net_input"])
+            net_output = model(**sample_s["net_input"])
         loss = self.compute_loss(model, net_output, sample, asr_transcriptions, source_lengths, reduce=reduce, valid=valid)
         sample_size = (
             sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
