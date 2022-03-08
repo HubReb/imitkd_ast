@@ -145,6 +145,7 @@ class ImitKD(FairseqCriterion):
         if valid:
             sample["net_input"].pop("src_text", None)
             net_output = model(**sample["net_input"])
+            loss = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
         else:
             sample, asr_transcriptions, source_lengths = self.generate_imit_batch(model, sample)
             sample_s = copy.deepcopy(sample)
@@ -234,7 +235,7 @@ class ImitKD(FairseqCriterion):
         student.train()
         return sample, transcriptions, lengths
 
-    def compute_loss(self, model, net_output, sample, transcriptions, source_lengths, reduce=True, valid=False):
+    def compute_loss(self, model, net_output, sample, transcriptions=None, source_lengths=None, reduce=True, valid=False):
         if valid:
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.padding_idx, reduce=reduce)
