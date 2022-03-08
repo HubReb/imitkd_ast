@@ -21,7 +21,7 @@ from fairseq.scoring import bleu
 
 
 @dataclass
-class ImitKDConfig(FairseqDataclass):
+class ImitKD_pipeline_nmt_trainingConfig(FairseqDataclass):
     expert: str = field(
         default="checkpoint_best.pt",
         metadata={"help": "NMT model to use as expert"},
@@ -98,9 +98,9 @@ def imit_kd_loss(
 
 
 @register_criterion(
-    "imit_pipeline_nmt_training", dataclass=ImitKDConfig
+    "imit_pipeline_nmt_training", dataclass=ImitKD_pipeline_nmt_trainingConfig
 )
-class ImitKD(FairseqCriterion):
+class ImitKD_pipeline_nmt_training(FairseqCriterion):
     def __init__(
             self,
             task,

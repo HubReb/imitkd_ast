@@ -197,6 +197,7 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
             source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
             sample_s = copy.deepcopy(sample)
             sample_s["net_input"].pop("src_text", None)
+            print(self.beta)
             if self.beta > 0.5:
                 generated_dataset = self.generate_with_random_data_mixture(model, sample_s)
             else:

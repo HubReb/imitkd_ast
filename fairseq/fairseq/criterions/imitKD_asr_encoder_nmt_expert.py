@@ -142,9 +142,13 @@ class ImitKD(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        sample, asr_transcriptions, source_lengths = self.generate_imit_batch(model, sample)
-        sample_s = copy.deepcopy(sample)
-        sample_s["net_input"].pop("src_text", None)
+        if valid:
+            sample["net_input"].pop("src_text", None)
+            net_output = model(**sample["net_input"])
+        else:
+            sample, asr_transcriptions, source_lengths = self.generate_imit_batch(model, sample)
+            sample_s = copy.deepcopy(sample)
+            sample_s["net_input"].pop("src_text", None)
         net_output = model(**sample_s["net_input"])
         loss = self.compute_loss(model, net_output, sample, asr_transcriptions, source_lengths, reduce=reduce, valid=valid)
         sample_size = (
