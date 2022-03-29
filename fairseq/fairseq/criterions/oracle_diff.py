@@ -2,24 +2,24 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-
+import copy
 import math
 from dataclasses import dataclass, field
-from random import randint
-
-from sacremoses import MosesDetokenizer
+from random import choice, randint
 
 import torch
 from torch.autograd import Variable
+import fastBPE
+from torch.distributions import Categorical
 
 from fairseq import metrics, utils
-from fairseq.scoring import bleu
-from fairseq.criterions import FairseqCriterion, register_criterion
-from fairseq.dataclass import FairseqDataclass
-from omegaconf import II
 from fairseq.checkpoint_utils import load_model_ensemble
+from fairseq.criterions import FairseqCriterion, register_criterion
 from fairseq.data import Dictionary
+from fairseq.dataclass import FairseqDataclass
+from fairseq.scoring import bleu
 from fairseq.sequence_generator import SequenceGenerator
+from nltk.translate.bleu_score import sentence_bleu
 
 
 @dataclass
@@ -48,12 +48,18 @@ class OracleDiffConfig(FairseqDataclass):
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/wmt19.en-de.joined-dict.ensemble/",
         metadata={"help": "directory with expert's dictionaries"},
     )
-    avoid_unk: bool = field(
+
+    bpe_codes: str = field(
+        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
+        metadata={"help": "expert's bpe codes"},
+    )
+    adbleu_loss: bool = field(
         default=False,
-        metadata={"help": "whether to split the model prediction before the first unknown"},
+        metadata={"help":"whether to use Luca Hormann's ADBLEU loss instead of AGGREVATEs BSE"}
     )
 
-def valid_loss(lprobs, target, ignore_prefix_size, ignore_index=None, reduce=True):
+
+def valid_loss(lprobs, target, ignore_index=None, reduce=True):
     if target.dim() == lprobs.dim() - 1:
         target = target.unsqueeze(-1)
     nll_loss = -lprobs.gather(dim=-1, index=target)
@@ -71,26 +77,38 @@ def knn_forced_loss(
         scores,
         sample_student,
         sample_expert,
-        lengths
-        ):
+        indices,
+        adbleu_loss,
+        complete_student_hypos
+):
     # avg_scores = scores.sum(2)/lengths
     # probs = torch.nn.functional.softmax(avg_scores.exp_())
     probs = scores
+    indices = torch.tensor(indices, device="cuda").view(-1, 1).unsqueeze(-1)
+    # print(indices.shape, probs.shape)
+    probs = probs.gather(dim=-1, index=indices)
     reward_student = sample_student["reward"]
-    reward_expert = sample_expert["reward"][:, 0].view(-1, 1)       # we only care about best hypo's reward
-    indicator = []
-    for i, reward_row in enumerate(reward_student):
-        indicator_row = []
-        for j, r in enumerate(reward_row):
-            print(sample_expert["reward"][i][j], r)
-            if r > sample_expert["reward"][i][j]:
-                indicator_row.append(0)
-            else:
-                indicator_row.append(1)
-        indicator.append(indicator_row)
-    indicator = torch.LongTensor(indicator).cuda()
-    loss = -(probs * indicator * ((reward_expert - reward_student)**2).type_as(probs)).sum()
-    return loss, reward_expert.mean(), reward_student.mean()
+    reward_expert = sample_expert["reward"][:, 0].view(-1, 1).cuda()  # we only care about best hypo's reward
+    if adbleu_loss:
+        complete_student_reward = torch.FloatTensor([
+            [h['bleu'] for h in hypos_i]
+            for hypos_i in complete_student_hypos
+        ]).cuda()
+        indicator = []
+        for i, reward_row in enumerate(reward_student):
+            indicator_row = []
+            for j, r in enumerate(reward_row):
+                if r > sample_expert["reward"][i][j]:
+                    indicator_row.append(0)
+                else:
+                    indicator_row.append(1)
+            indicator.append(indicator_row)
+        indicator = torch.LongTensor(indicator).cuda()
+    if adbleu_loss:
+        loss = -(probs * indicator * (torch.tanh(reward_student).cuda() - (reward_expert - complete_student_reward))**2).sum()
+    else:
+        loss = -(probs * ((reward_student.cuda() - reward_expert) ** 2).type_as(probs)).sum()
+    return loss, reward_expert.sum(), reward_student.sum()
 
 
 @register_criterion(
@@ -98,15 +116,16 @@ def knn_forced_loss(
 )
 class OracleDiff(FairseqCriterion):
     def __init__(
-        self,
-        task,
-        expert,
-        expert_vocab_src,
-        expert_vocab_tgt,
-        path,
-        avoid_unk,
-        ignore_prefix_size=0,
-        report_accuracy=False,
+            self,
+            task,
+            expert,
+            expert_vocab_src,
+            expert_vocab_tgt,
+            path,
+            bpe_codes,
+            adbleu_loss,
+            ignore_prefix_size=0,
+            report_accuracy=False,
     ):
         super().__init__(task)
         self.ignore_prefix_size = ignore_prefix_size
@@ -119,10 +138,17 @@ class OracleDiff(FairseqCriterion):
         self.dict = task.tgt_dict
         self.eos = self.dict.eos()
         self.pad_idx = self.padding_idx
+        self.expert = self.expert.eval()
+        self.expert_vocab_src = Dictionary.load(expert_vocab_src)
+        self.expert_vocab_tgt = Dictionary.load(expert_vocab_tgt)
+        self.expert.requires_grad = False
+        self.dict = task.tgt_dict
+        self.eos = self.dict.eos()
+        self.bpe = fastBPE.fastBPE(bpe_codes, expert_vocab_tgt)
+        self.pad_idx = self.padding_idx
         self.sentence_avg = False
+        self.adbleu_loss = adbleu_loss
         self._scorer = BleuScorer(self.pad_idx, self.eos, self.dict.unk())
-        self.avoid_unk = avoid_unk
-
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
@@ -132,15 +158,17 @@ class OracleDiff(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        net_output = model(**sample["net_input"])
+        sample_f = copy.deepcopy(sample)
+        sample_f["net_input"].pop("src_text", None)
+        net_output = model(**sample_f["net_input"])
         loss, r_expert, r_student = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
         sample_size = (
             sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
         )
         logging_output = {
-            "loss" : loss.data,
-            "reward_expert": r_expert.data,
-            "reward_student": r_student.data,
+            "loss": loss.data,
+            "reward_expert": r_expert,
+            "reward_student": r_student,
             "ntokens": sample["ntokens"],
             "nsentences": sample["target"].size(0),
             "sample_size": sample_size,
@@ -156,28 +184,35 @@ class OracleDiff(FairseqCriterion):
         target = model.get_targets(sample, net_output)
         if self.ignore_prefix_size > 0:
             if getattr(lprobs, "batch_first", False):
-                lprobs = lprobs[:, self.ignore_prefix_size :, :].contiguous()
-                target = target[:, self.ignore_prefix_size :].contiguous()
+                lprobs = lprobs[:, self.ignore_prefix_size:, :].contiguous()
+                target = target[:, self.ignore_prefix_size:].contiguous()
             else:
-                lprobs = lprobs[self.ignore_prefix_size :, :, :].contiguous()
-                target = target[self.ignore_prefix_size :, :].contiguous()
+                lprobs = lprobs[self.ignore_prefix_size:, :, :].contiguous()
+                target = target[self.ignore_prefix_size:, :].contiguous()
         return lprobs, target
 
     def compute_loss(self, model, net_output, sample, reduce=True, valid=False):
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
         if valid:
-            loss = valid_loss(lprobs, target, self.ignore_prefix_size, self.ignore_prefix_size, reduce=reduce)
+            loss = valid_loss(lprobs, target, self.ignore_prefix_size, reduce=reduce)
             r_expert, r_student = 0, 0
         else:
-            expert_input, texts, cut_texts, indices, student_hypos = self.get_student_predictions_and_pass_to_expert(model, target, sample)
-            source_text = self.transform_source_tokens_into_expert_voc(sample)
-            expert_output_samples = self.get_expert_output(sample, source_text, expert_input)
-            scores, sample_student, sample_expert, lengths = self.get_hypos_and_scores(sample, model, lprobs, expert_output_samples, student_hypos)
+            source_text, source_lens = self.transform_source_tokens_into_expert_voc(sample)
+            expert_input, texts, cut_texts, indices, student_hypos, original_student_hypos = self.get_student_predictions_and_pass_to_expert(
+                model, sample)
+            expert_output_samples = self.get_expert_output(sample, source_text, source_lens, expert_input)
+            scores, sample_student, sample_expert, lengths, original_student_hypos = self.get_hypos_and_scores(sample, lprobs,
+                                                                                       expert_output_samples,
+                                                                                       student_hypos,
+                                                                                       original_student_hypos
+                                                                                       )
             loss, r_expert, r_student = knn_forced_loss(
                 scores,
                 sample_student,
                 sample_expert,
-                lengths
+                indices,
+                self.adbleu_loss,
+                original_student_hypos
             )
         return loss, r_expert, r_student
 
@@ -196,7 +231,7 @@ class OracleDiff(FairseqCriterion):
     def reduce_metrics(cls, logging_outputs) -> None:
         """Aggregate logging outputs from data parallel training."""
         loss_sum = sum(log.get("loss", 0) for log in logging_outputs)
-        ntokens = sum(log.get("ntokens", 0) for log in logging_outputs)
+        sum(log.get("ntokens", 0) for log in logging_outputs)
         sample_size = sum(log.get("sample_size", 0) for log in logging_outputs)
         reward_expert_sum = sum(log.get("reward_expert", 0) for log in logging_outputs)
         reward_student_sum = sum(log.get("reward_student", 0) for log in logging_outputs)
@@ -205,10 +240,10 @@ class OracleDiff(FairseqCriterion):
             "loss", loss_sum / sample_size / math.log(2), sample_size, round=3
         )
         metrics.log_scalar(
-            "mean_reward_expert", reward_expert_sum  / sample_size / math.log(2), sample_size, round=3
+            "mean_reward_expert", reward_expert_sum / sample_size, sample_size, round=3
         )
         metrics.log_scalar(
-            "mean_reward_student", reward_student_sum  / sample_size / math.log(2), sample_size, round=3
+            "mean_reward_student", reward_student_sum / sample_size, sample_size, round=3
         )
         total = utils.item(sum(log.get("total", 0) for log in logging_outputs))
         if total > 0:
@@ -235,8 +270,8 @@ class OracleDiff(FairseqCriterion):
         """
         return True
 
-
-    def collate_tokens(self, values, pad_idx, eos, left_pad, move_eos_to_beginning):
+    @staticmethod
+    def collate_tokens(values, pad_idx, eos, left_pad, move_eos_to_beginning):
         size = max(v.size(0) for v in values)
         res = values[0].new(len(values), size).fill_(pad_idx)
 
@@ -251,7 +286,7 @@ class OracleDiff(FairseqCriterion):
 
         for i, v in enumerate(values):
             if left_pad:
-                copy_tensor(v, res[i][size-len(v):])
+                copy_tensor(v, res[i][size - len(v):])
             else:
                 copy_tensor(v, res[i][:len(v)])
         return res
@@ -260,23 +295,19 @@ class OracleDiff(FairseqCriterion):
         num_hypos_per_batch = len(hypos[0])
         assert all(len(h) == num_hypos_per_batch for h in hypos)
 
-        def repeat_num_hypos_times(t, dim2=False):
-            ta = t.repeat(1, num_hypos_per_batch, 1, 1)
-            return ta.view(num_hypos_per_batch*t.size(0), t.size(1), t.size(2))
-
-        input = sample['net_input']
-        bsz = input['src_tokens'].size(0)
-        #input['src_tokens'].data = repeat_num_hypos_times(input['src_tokens'].data)
-        #input['prev_output_tokens'].data = repeat_num_hypos_times(input['prev_output_tokens'].data, dim2=True)
+        input_for_sample = sample['net_input']
+        bsz = input_for_sample['src_tokens'].size(0)
+        # input['src_tokens'].data = repeat_num_hypos_times(input['src_tokens'].data)
+        # input['prev_output_tokens'].data = repeat_num_hypos_times(input['prev_output_tokens'].data, dim2=True)
 
         input_hypos = [h['tokens'] for hypos_i in hypos for h in hypos_i]
         sample['hypotheses'] = self.collate_tokens(
             input_hypos, self.pad_idx, self.eos, left_pad=False, move_eos_to_beginning=False)
         # only needed for authors' model
         # input['input_tokens'] = self.collate_tokens(
-            # input_hypos, self.pad_idx, self.eos, left_pad=True, move_eos_to_beginning=True)
+        # input_hypos, self.pad_idx, self.eos, left_pad=True, move_eos_to_beginning=True)
         # input['input_positions'] = self.collate_positions(
-            # input_hypos, self.pad_idx, left_pad=True)
+        # input_hypos, self.pad_idx, left_pad=True)
 
         # sample['target'].data = repeat_num_hypos_times(sample['target'].data, dim2=True)
         sample['ntokens'] = sample['target'].data.ne(self.pad_idx).sum()
@@ -303,47 +334,48 @@ class OracleDiff(FairseqCriterion):
             })
         return hypos
 
-    def add_bleu_to_hypotheses(self, sample, hypos, expert=False):
+    def add_bleu_to_hypotheses(self, sample, hypos, student=False):
         """Add BLEU scores to the set of hypotheses.
 
         This can be called from prepare_sample_and_hypotheses.
         """
-
-        if 'includes_bleu' in sample:
-            return hypos
         sample['includes_bleu'] = True
 
         target = sample['target'].data.int()
-        if not expert:
-            for i, hypos_i in enumerate(hypos):
-                ref = utils.strip_pad(target[i, :], self.pad_idx).cpu()
-                r = self.dict.string(ref, bpe_symbol='sentencepiece', escape_unk=True)
-                r = self.dict.encode_line(r, add_if_not_exist=False)
-                for hypo in hypos_i:
-                    h = self.dict.string(hypo['tokens'].int().cpu(), bpe_symbol='sentencepiece')
-                    h = self.dict.encode_line(h, add_if_not_exist=False)
-                    # use +1 smoothing for sentence BLEU
-                    hypo['bleu'] = self._scorer.score(r, h)
-        else:
-            for i, hypos_i in enumerate(hypos):
-                ref = utils.strip_pad(target[i, :], self.pad_idx).cpu()
-                r = self.dict.string(ref, bpe_symbol='sentencepiece', escape_unk=True)
-                r = self.expert_vocab_tgt.encode_line(r, add_if_not_exist=False)
-                for hypo in hypos_i:
-                    h = self.expert_vocab_tgt.string(hypo['tokens'].int().cpu(), bpe_symbol='fastBPE')
-                    h = self.expert_vocab_tgt.encode_line(h, add_if_not_exist=False)
-                    # use +1 smoothing for sentence BLEU
-                    hypo['bleu'] = self._scorer.score(r, h)
- 
+        for i, hypos_i in enumerate(hypos):
+            ref = utils.strip_pad(target[i, :], self.pad_idx).cpu()
+            r = self.dict.string(ref, bpe_symbol='fastBPE', escape_unk=True).split()
+            #r = self.expert_vocab_tgt.encode_line(r, add_if_not_exist=False)
+            for hypo in hypos_i:
+                if student:
+                    h = self.expert_vocab_tgt.string(utils.strip_pad(hypo['tokens'][:-1], self.pad_idx).int().cpu(),
+                                                     bpe_symbol='fastBPE').split()
+                else:
+                    h = self.expert_vocab_tgt.string(
+                        utils.strip_pad(hypo['tokens'], self.pad_idx).int().cpu(),
+                        bpe_symbol='fastBPE'
+                    ).split()
+                #h = self.expert_vocab_tgt.encode_line(h, add_if_not_exist=False)
+
+                score = sentence_bleu(
+                    [r],
+                    h
+                )
+                hypo['bleu'] = score
+
+                # use +1 smoothing for sentence BLEU
+                #hypo['bleu'] = self._scorer.score(r, h)
         return hypos
 
-
-    def prepare_sample_and_hypotheses(self, model, sample, hypos, expert=False):
+    def prepare_sample_and_hypotheses(self, sample, hypos, student=False):
         """Apply criterion-specific modifications to the given sample/hypotheses."""
-        scale_scores = lambda x : x
+        scale_scores = lambda x: x
 
         # compute BLEU reward for each hypothesis
-        hypos = self.add_bleu_to_hypotheses(sample, hypos, expert)
+        if student:
+            hypos = self.add_bleu_to_hypotheses(sample, hypos, student)
+        else:
+            hypos = self.add_bleu_to_hypotheses(sample, hypos)
         reward = torch.FloatTensor([
             scale_scores([h['bleu'] for h in hypos_i])
             for hypos_i in hypos
@@ -351,104 +383,123 @@ class OracleDiff(FairseqCriterion):
         sample['reward'] = Variable(reward, requires_grad=False)
         return sample, hypos
 
-    def get_student_predictions_and_pass_to_expert(self, model, target, sample):
-        student_predictions = []
-        student_generator = SequenceGenerator([model], self.dict, beam_size=1)
-        student_generator.cuda()
-        hypos = student_generator._generate(sample)
-        texts = []
-        indices = []
-        cut_texts = []
-        for prediction in hypos:
-            prediction_string = self.dict.string(
-                utils.strip_pad(prediction[0]["tokens"], self.padding_idx),
-                bpe_symbol="sentencepiece",
-            )
-            max_range = len(prediction_string.split())-1
-            if max_range <= 1:
-                index = 1
-            else:
-                index = randint(1, len(prediction_string.split())-1)
-            indices.append(index)
-            texts.append(prediction_string)
-            prediction_string = " ".join(prediction_string.split()[:index])
-            cut_texts.append(prediction_string)
-            prediction_string_in_expert_vocab = self.expert_vocab_tgt.encode_line(
-                    prediction_string, add_if_not_exist=False, append_eos=False
+    def get_student_predictions_and_pass_to_expert(self, model, sample):
+        with torch.no_grad():
+            student_predictions = []
+            model = model.eval()
+            targets = sample["net_input"]["prev_output_tokens"].data.tolist()
+            sample["net_input"].pop("src_text", None)
+            net_output = model.get_normalized_probs(model(**sample["net_input"]), log_probs=True)
+            top_k_predictions = torch.topk(net_output, k=5, dim=-1).indices
+            max_length = max([len(i) for i in targets])  # let's avoid blowing up the GPU RAM, shall we?
+            student_generator = SequenceGenerator([model], self.dict, beam_size=1, max_len=max_length)
+            student_generator.cuda()
+            self.beta = 0.1
+            dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
+            samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
+            hypos = student_generator._generate(sample)
+            original_hypos = copy.deepcopy(hypos)
+            texts = []
+            indices = []
+            cut_texts = []
+            for i, prediction in enumerate(hypos):
+                max_range = len(prediction[0]["tokens"]) - 1
+                if max_range <= 1:
+                    index = 1
+                else:
+                    index = randint(1, max_range)
+                indices.append(index)
+                if samp_mask[i]:
+                    student_predictions.append(prediction[0]["tokens"][:index+1])
+                    hypos[i][0]["tokens"] = prediction[0]["tokens"][:index+1].cuda()
+                else:
+                    new_hypo = torch.tensor(
+                        prediction[0]["tokens"][:index].data.tolist() +
+                        [choice(top_k_predictions[i][index].tolist())]
                     )
-            if self.expert_vocab_tgt.unk() in prediction_string_in_expert_vocab and self.avoid_unk:
-                indices.pop()
-                new_index = prediction_string_in_expert_vocab.tolist().index(self.expert_vocab_tgt.unk())
-                prediction_string = self.expert_vocab_tgt.string(
-                        utils.strip_pad(prediction_string_in_expert_vocab[:new_index], self.expert_vocab_tgt.pad()),
-                        bpe_symbol="fastBPE"
-                )
-                indices.append(len(prediction_string.split()))
-                prediction_string_in_expert_vocab = prediction_string_in_expert_vocab[:new_index]
-            student_predictions.append(prediction_string_in_expert_vocab.to(torch.int64))
-        expert_input = self.collate_tokens(
+                    student_predictions.append(new_hypo)
+                    hypos[i][0]["tokens"] = new_hypo.cuda()
+
+            expert_input = self.collate_tokens(
                 student_predictions,
                 self.expert_vocab_src.pad(),
                 self.expert_vocab_src.eos(),
                 left_pad=False,
                 move_eos_to_beginning=False
-        )
-        return expert_input, texts, cut_texts, indices, hypos
+            )
+        model = model.train()
+        return expert_input, texts, cut_texts, indices, hypos, original_hypos
 
     def transform_source_tokens_into_expert_voc(self, sample):
         source_text = sample["net_input"]["src_text"]
         source_texts = []
         for line in source_text:
-            if type(line) == list:
+            if isinstance(line, list):
                 for text in line:
-                    source_texts.append(self.expert_vocab_src.encode_line(text, add_if_not_exist=False, append_eos=True))
+                    source_texts.append(self.expert_vocab_src.encode_line(
+                        self.bpe.apply([text])[0],
+                        add_if_not_exist=False,
+                        append_eos=True)
+                    )
             else:
-                source_texts.append(self.expert_vocab_src.encode_line(line, add_if_not_exist=False, append_eos=True))
-        source_text = self.collate_tokens(
+                source_texts.append(self.expert_vocab_src.encode_line(
+                    self.bpe.apply([line])[0],
+                    add_if_not_exist=False,
+                    append_eos=True)
+                )
+        src_lengths = [len(text) for text in source_texts]
+        source_text = collate_tokens(
             source_texts,
             self.expert_vocab_src.pad(),
             self.expert_vocab_src.eos(),
             left_pad=False,
             move_eos_to_beginning=False
         )
-        return source_text
+        return source_text, src_lengths
 
-    def get_expert_output(self, sample, source_texts, expert_input):
+    def get_expert_output(self, sample, source_texts, source_lens, expert_input):
+        targets = sample["net_input"]["prev_output_tokens"].data.tolist()
+        max_length = max([len(i) for i in targets])  # let's avoid blowing up the GPU RAM, shall we?
         out = {
             "id": sample["id"],
             "net_input": {
                 "src_tokens": source_texts.cuda(),
-                "src_lengths": [len(text) for text in source_texts],
+                "src_lengths": source_lens,
                 "prev_output_tokens": [],
             },
             "target": sample["target"],
             "target_lengths": sample["target_lengths"],
             "ntokens": sample["ntokens"],
             "nsentences": sample["nsentences"],
-            }
+        }
         expert_generator = SequenceGenerator(
-                [self.expert],
-                self.expert_vocab_tgt,
-                beam_size=5
-        )
-        expert_output = expert_generator.generate(
             [self.expert],
-            out,
-            prefix_tokens=expert_input.cuda()
+            self.expert_vocab_tgt,
+            beam_size=5,
+            max_len=max_length
         )
+        with torch.no_grad():
+            expert_output = expert_generator.generate(
+                [self.expert],
+                out,
+                prefix_tokens=expert_input.cuda()
+            )
+            for i, j in enumerate(expert_output):
+                expert_output[i] = [j[0]]
         return expert_output
 
-    def get_hypos_and_scores(self, sample, model, lprobs, expert_output_samples, student_hypos):
+    def get_hypos_and_scores(self, sample, lprobs, expert_output_samples, student_hypos, complete_student_hypos):
         sample_expert = sample.copy()
-        sample_student, hypos_student = self.prepare_sample_and_hypotheses(model, sample, student_hypos)
-        sample_expert, hypos_expert = self.prepare_sample_and_hypotheses(model, sample_expert, expert_output_samples, expert=True)
+        complete_hypothesis_student = self.add_bleu_to_hypotheses(sample, complete_student_hypos)
+        sample_student, hypos_student = self.prepare_sample_and_hypotheses(sample, student_hypos, student=True)
+        sample_expert, hypos_expert = self.prepare_sample_and_hypotheses(sample_expert, expert_output_samples)
         sample_student = self.update_sample_with_hypos(sample_student, hypos_student)
         sample_expert = self.update_sample_with_hypos(sample_expert, hypos_expert)
         bzw, _, vocab_len = lprobs.size()
-        lengths = Variable(sample_student['hypotheses'].view(bzw, 1, -1).ne(self.dict.pad()).sum(2).float(), requires_grad=False)
+        lengths = Variable(sample_student['hypotheses'].view(bzw, 1, -1).ne(self.dict.pad()).sum(2).float(),
+                           requires_grad=False)
         scores = self.get_hypothesis_scores(lprobs, sample)
-        return scores, sample_student, sample_expert, lengths
- 
+        return scores, sample_student, sample_expert, lengths, complete_hypothesis_student
 
     def get_hypothesis_scores(self, lprobs, sample):
         hypotheses = Variable(sample['hypotheses'], requires_grad=False)
@@ -481,3 +532,23 @@ class BleuScorer(object):
         self._scorer.add(ref, hypo)
         return self._scorer.score()
 
+
+def collate_tokens(values, pad_idx, eos, left_pad, move_eos_to_beginning):
+    size = max(v.size(0) for v in values)
+    res = values[0].new(len(values), size).fill_(pad_idx)
+
+    def copy_tensor(src, dst):
+        assert dst.numel() == src.numel()
+        if move_eos_to_beginning:
+            assert src[-1] == eos
+            dst[0] = eos
+            dst[1:] = src[:-1]
+        else:
+            dst.copy_(src)
+
+    for i, v in enumerate(values):
+        if left_pad:
+            copy_tensor(v, res[i][size - len(v):])
+        else:
+            copy_tensor(v, res[i][:len(v)])
+    return res

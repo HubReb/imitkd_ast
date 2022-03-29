@@ -25,7 +25,7 @@ from nltk.translate.bleu_score import sentence_bleu
 
 
 @dataclass
-class ImitKDConfigCheckedPredictionsWithGoldReferences(FairseqDataclass):
+class ImitKDConfigCheckedPredictionsWithGoldReferencesWeightedCEAdded(FairseqDataclass):
     expert: str = field(
         default="checkpoint_best.pt",
         metadata={"help": "NMT model to use as expert"},
@@ -88,7 +88,9 @@ def imit_kd_loss(
         expert_vocab_tgt,
         bpe,
         ignore_index,
-        source_lengths
+        source_lengths,
+        weighted_list,
+        original_output_tokens
 ):
     sample_expert = {
         "id": generated_dataset["id"],
@@ -107,17 +109,28 @@ def imit_kd_loss(
         # expert_preds = expert_out.argmax(-1)
         pad_mask = expert_out.eq(model_dict.pad())
         expert_out.masked_fill_(pad_mask, 0.0)
+    sample_expert["net_input"]["prev_output_tokens"] = original_output_tokens
+    with torch.no_grad():
+        original_sample_expert_out = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=False)
+        expert_preds = expert_out.argmax(-1)
+        pad_mask = expert_out.eq(model_dict.pad())
+        original_sample_expert_out.masked_fill_(pad_mask, 0.0)
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
+    generated_dataset["net_input"]["prev_output_tokens"] = original_output_tokens
+    lprobs_original_sample = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
+    weighted_list = weighted_list.unsqueeze(1)
+    weighted_list = weighted_list.unsqueeze(1)
+    weighted_list = weighted_list.view(-1, 1, 1)
+    ce_imit_kd_loss_for_sample = original_sample_expert_out * lprobs_original_sample * weighted_list
     # pad_mask = lprobs.eq(model_dict.pad())
     # lprobs.masked_fill_(pad_mask, 0.0)
     # kl_loss = kl_div(lprobs, expert_out, reduction="batchmean", log_target=True)
     # good old CE
-    return -torch.sum(expert_out * lprobs)
-
+    return -torch.sum(expert_out * lprobs) - ce_imit_kd_loss_for_sample.sum()
 
 
 @register_criterion(
-    "imit_kd_checked_predictions", dataclass=ImitKDConfigCheckedPredictionsWithGoldReferences
+    "imit_kd_checked_predictions_weighted_original_ce_added", dataclass=ImitKDConfigCheckedPredictionsWithGoldReferencesWeightedCEAdded
 )
 class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
     def __init__(
@@ -197,10 +210,7 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
             source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
             sample_s = copy.deepcopy(sample)
             sample_s["net_input"].pop("src_text", None)
-            #if self.beta > 0.5:
-            #generated_dataset = self.generate_with_random_data_mixture(model, sample_s)
-            #else:
-            generated_dataset = self.generate_imit_batch(model, sample_s, source_text, source_lengths)
+            generated_dataset, weighted_list = self.generate_imit_batch(model, sample_s, source_text, source_lengths)
             loss = imit_kd_loss(
                 generated_dataset,
                 model,
@@ -210,7 +220,9 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
                 self.expert_vocab_tgt,
                 self.bpe,
                 self.padding_idx,
-                source_lengths
+                source_lengths,
+                weighted_list,
+                sample_s["net_input"]["prev_output_tokens"]
             )
         return loss
 
@@ -262,12 +274,15 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
             targets = sample["net_input"]["prev_output_tokens"].data.tolist()
             max_length = max([len(i) for i in targets])  # let's avoid blowing up the GPU RAM, shall we?
             student_generator = SequenceGenerator([student], self.dict, beam_size=1, max_len=max_length)
-            expert_generator = SequenceGenerator([self.expert], self.expert_vocab_tgt, beam_size=1, max_len=max_length)
+            expert_generator = SequenceGenerator([self.expert], self.expert_vocab_tgt, beam_size=1, max_len =max_length)
             student_generator.cuda()
             hypos = student_generator._generate(sample)
             # using parameter , generated_length=max_length would achieve the same  as cutting of hypothesis at
             # [:max_length] after generation, but requires dealing with token matrix instead of the dict
             hypos_expert = expert_generator._generate(sample_expert)
+            dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
+            samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
+            weighted_list = []
             for i, hypo in enumerate(hypos):
                 # prediction_list = hypo[0]["tokens"].tolist()
                 prediction_list = self.dict.string(
@@ -284,15 +299,16 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
                     prediction_list,
                     weights=(0.1, 0.4, 0.5)
                 )
-                if score >= 0.3:
-                    # print(prediction_list, targets[i])
-                    if hypo[0]["tokens"][-1] != self.dict.eos():
-                        targets[i] = torch.tensor([self.dict.eos()] + hypo[0]["tokens"].tolist())
-                    else:
-                        hypo = hypo[0]["tokens"].tolist()
-                        targets[i] = torch.tensor([hypo[-1]] + hypo[1:-1])
+                # print(prediction_list, targets[i])
+                if hypo[0]["tokens"][-1] != self.dict.eos():
+                     targets[i] = torch.tensor([self.dict.eos()] + hypo[0]["tokens"].tolist())
                 else:
-                    targets[i] = torch.tensor(targets[i])
+                    hypo = hypo[0]["tokens"].tolist()
+                    targets[i] = torch.tensor([hypo[-1]] + hypo[1:-1])
+                if score >= 0.3:
+                    weighted_list.append(0)
+                else:
+                    weighted_list.append(1)
             sample["net_input"]["prev_output_tokens"] = collate_tokens(
                 targets,
                 self.dict.pad(),
@@ -301,7 +317,8 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
                 move_eos_to_beginning=False
             ).cuda()
             student.train()
-        return sample
+            weighted_list = torch.tensor(weighted_list, device="cuda")
+        return sample,  weighted_list
 
     def compute_accuracy(self, model, net_output, sample):
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)

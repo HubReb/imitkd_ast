@@ -21,7 +21,7 @@ from fairseq.scoring import bleu
 
 
 @dataclass
-class ImitKD_pipeline_nmt_trainingConfig(FairseqDataclass):
+class ImitKD_pipeline_asr_trainingConfig(FairseqDataclass):
     expert: str = field(
         default="checkpoint_best.pt",
         metadata={"help": "NMT model to use as expert"},
@@ -50,11 +50,11 @@ class ImitKD_pipeline_nmt_trainingConfig(FairseqDataclass):
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/wmt19.en-de.joined-dict.ensemble/",
         metadata={"help": "directory with expert's dictionaries"},
     )
-    asr_model: str = field(
+    nmt_model: str = field(
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/europarl_asr.pt",
         metadata={"help": "asr model"}
     )
-    path_asr_model: str = field(
+    path_nmt_model: str = field(
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/v1.1",
         metadata={"help": "path to ASR model"}
     )
@@ -82,25 +82,42 @@ def imit_kd_loss(
         generated_dataset,
         source_texts,
         model,
+        nmt_model,
         expert,
         source_lengths,
+        new_sample,
+        eos_index,
         ignore_index,
 ):
-    sample_expert = copy.deepcopy(generated_dataset)
+    sample_expert = copy.deepcopy(new_sample)
     sample_expert["net_input"]["src_tokens"] = source_texts.cuda()
     sample_expert["net_input"]["src_lengths"] = source_lengths
     with torch.no_grad():
         expert_logits = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=False)
         pad_mask = expert_logits.eq(ignore_index)
         expert_logits.masked_fill_(pad_mask, 0.0)
-    lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
+    asr_ouput = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
+    asr_ouput = asr_ouput.argmax(-1)
+    asr_output_list = asr_ouput.tolist()
+    asr_output_list_lengths = []
+    for l in asr_output_list:
+        try:
+            eos_index = l.index(eos_index)
+        except ValueError:
+            eos_index = len(l)
+        if eos_index == 0:
+            eos_index = 1       # else forward pass of nmt model fails (should never be zero, but at begin ASR Model puts out nonsense...)  
+        asr_output_list_lengths.append(eos_index)
+    new_sample["net_input"]["src_tokens"] = asr_ouput
+    new_sample["net_input"]["src_lengths"] = torch.tensor(asr_output_list_lengths, device="cuda")
+    lprobs = nmt_model.get_normalized_probs(nmt_model(**new_sample["net_input"]), log_probs=True)
     return -torch.sum(expert_logits * lprobs)
 
 
 @register_criterion(
-    "imit_pipeline_nmt_training", dataclass=ImitKD_pipeline_nmt_trainingConfig
+    "imit_pipeline_asr_training", dataclass=ImitKD_pipeline_asr_trainingConfig
 )
-class ImitKD_pipeline_nmt_training(FairseqCriterion):
+class ImitKD_pipeline_asr_training(FairseqCriterion):
     def __init__(
             self,
             task,
@@ -108,8 +125,8 @@ class ImitKD_pipeline_nmt_training(FairseqCriterion):
             expert_vocab_src,
             expert_vocab_tgt,
             path,
-            asr_model,
-            path_asr_model,
+            nmt_model,
+            path_nmt_model,
             beta,
             bpe_codes,
             ignore_prefix_size=0,
@@ -130,9 +147,8 @@ class ImitKD_pipeline_nmt_training(FairseqCriterion):
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
         self.beta = beta
-        self.asr_model, _ = load_model_ensemble([asr_model], arg_overrides={"data": path_asr_model, "encoder_freezing_updates": 0})
-        self.asr_model = self.asr_model[-1]
-        self.asr_model = self.asr_model.eval()
+        self.nmt_model_ensemble, _ = load_model_ensemble([nmt_model], arg_overrides={"data": path_nmt_model, "encoder_freezing_updates": 0})
+        self.nmt_model = copy.deepcopy(self.nmt_model_ensemble[-1])
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
@@ -143,11 +159,10 @@ class ImitKD_pipeline_nmt_training(FairseqCriterion):
         3) logging outputs to display while training
         """
         source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
-        sample = self.generate_imit_batch(model, sample)
-        sample_s = copy.deepcopy(sample)
-        sample_s["net_input"].pop("src_text", None)
-        net_output = model(**sample_s["net_input"])
-        loss = self.compute_loss(model, net_output, sample, source_text, source_lengths, reduce=reduce, valid=valid)
+        self.nmt_model = copy.deepcopy(self.nmt_model_ensemble[-1])
+        sample, new_sample = self.generate_imit_batch(model, sample, source_text)
+        net_output = self.nmt_model(**new_sample["net_input"])
+        loss = self.compute_loss(model, net_output, sample, source_text, source_lengths, new_sample, reduce=reduce, valid=valid)
         sample_size = (
             sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
         )
@@ -183,16 +198,18 @@ class ImitKD_pipeline_nmt_training(FairseqCriterion):
         total = torch.sum(mask)
         return n_correct, total
 
-    def generate_imit_batch(self, student, sample):
+    def generate_imit_batch(self, student, sample, source_text):
         with torch.no_grad():
             student = student.eval()
+            self.nmt_model.eval()
+            sample["net_input"].pop("src_text", None)
+            new_sample = copy.deepcopy(sample)
             prev_output_tokens = sample["net_input"]["prev_output_tokens"].data.tolist()
             max_length = max([len(i) for i in prev_output_tokens])  # let's avoid blowing up the GPU RAM, shall we?
             student_generator = SequenceGenerator([student], self.dict, beam_size=1, max_len=max_length)
-            asr_generator = SequenceGenerator([self.asr_model], self.dict, beam_size=1, max_len=max_length)
+            nmt_generator = SequenceGenerator([self.nmt_model], self.dict, beam_size=1, max_len=max_length).cuda()
             student_generator.cuda()
-            sample["net_input"].pop("src_text", None)
-            transcription_hypos = asr_generator._generate(sample)
+            transcription_hypos = student_generator._generate(sample)
             transcriptions = []
             lengths = []
             for i, h in enumerate(transcription_hypos):
@@ -205,11 +222,12 @@ class ImitKD_pipeline_nmt_training(FairseqCriterion):
                 left_pad=False,
                 move_eos_to_beginning=False
             ).cuda()
-            sample["net_input"]["src_tokens"] = transcriptions
-            sample["net_input"]["src_lengths"] = torch.tensor(lengths, device="cuda")
-            student_hypos = student_generator._generate(sample)
+            new_sample["net_input"]["src_tokens"] = transcriptions
+            new_sample["net_input"]["src_lengths"] = torch.tensor(lengths, device="cuda")
+            student_hypos = nmt_generator._generate(new_sample)
             dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
             samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
+            sample_prev_output = copy.deepcopy(source_text).tolist()
             for i, h in enumerate(student_hypos):
                 if samp_mask[i]:
                     if h[0]["tokens"][-1] != self.dict.eos():
@@ -217,9 +235,25 @@ class ImitKD_pipeline_nmt_training(FairseqCriterion):
                     else:
                         hypo = h[0]["tokens"].tolist()
                         prev_output_tokens[i] = torch.tensor([hypo[-1]] + hypo[1:-1])
+                    if transcriptions[i][-1] != self.dict.eos():
+                        sample_prev_output[i] = torch.tensor([self.dict.eos()] + transcriptions[i].tolist())
+                    else:
+                        sample_prev_output[i] = torch.tensor([self.dict.eos()] + transcriptions[i][:-1].tolist())
                 else:
                     prev_output_tokens[i] = torch.tensor(prev_output_tokens[i])
+                    sample_prev_output[i] = torch.tensor(sample_prev_output[i])
+            length_check = sample_prev_output[-1].tolist()
+            while len(length_check) < max_length:
+                length_check.append(self.dict.pad())
+            sample_prev_output[-1] = torch.tensor(length_check)
             sample["net_input"]["prev_output_tokens"] = collate_tokens(
+                sample_prev_output,
+                self.dict.pad(),
+                self.dict.eos(),
+                left_pad=False,
+                move_eos_to_beginning=False
+            ).cuda()
+            new_sample["net_input"]["prev_output_tokens"] = collate_tokens(
                 prev_output_tokens,
                 self.dict.pad(),
                 self.dict.eos(),
@@ -227,14 +261,15 @@ class ImitKD_pipeline_nmt_training(FairseqCriterion):
                 move_eos_to_beginning=False
             ).cuda()
         student.train()
-        return sample
+        self.nmt_model.train()
+        return sample, new_sample
 
-    def compute_loss(self, model, net_output, sample, source_text, source_lengths, reduce=True, valid=False):
+    def compute_loss(self, model, net_output, sample, source_text, source_lengths, new_sample, reduce=True, valid=False):
         if valid:
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.padding_idx, reduce=reduce)
         else:
-            loss = imit_kd_loss(sample, source_text, model, self.expert, source_lengths, self.pad_idx)
+            loss = imit_kd_loss(sample, source_text, model, self.nmt_model, self.expert, source_lengths, new_sample, self.eos, self.pad_idx)
         return loss
 
     @classmethod
