@@ -235,15 +235,16 @@ class OracleDiff(FairseqCriterion):
         sample_size = sum(log.get("sample_size", 0) for log in logging_outputs)
         reward_expert_sum = sum(log.get("reward_expert", 0) for log in logging_outputs)
         reward_student_sum = sum(log.get("reward_student", 0) for log in logging_outputs)
+        number_of_sentences = sum(log.get("nsentences", 0) for log in logging_outputs)
 
         metrics.log_scalar(
             "loss", loss_sum / sample_size / math.log(2), sample_size, round=3
         )
         metrics.log_scalar(
-            "mean_reward_expert", reward_expert_sum / sample_size, sample_size, round=3
+            "mean_reward_expert", reward_expert_sum / number_of_sentences, sample_size, round=3
         )
         metrics.log_scalar(
-            "mean_reward_student", reward_student_sum / sample_size, sample_size, round=3
+            "mean_reward_student", reward_student_sum / number_of_sentences, sample_size, round=3
         )
         total = utils.item(sum(log.get("total", 0) for log in logging_outputs))
         if total > 0:
@@ -344,27 +345,28 @@ class OracleDiff(FairseqCriterion):
         target = sample['target'].data.int()
         for i, hypos_i in enumerate(hypos):
             ref = utils.strip_pad(target[i, :], self.pad_idx).cpu()
-            r = self.dict.string(ref, bpe_symbol='fastBPE', escape_unk=True).split()
-            #r = self.expert_vocab_tgt.encode_line(r, add_if_not_exist=False)
+            r = self.dict.string(ref, bpe_symbol='fastBPE', escape_unk=True)#.split()
+            r = self.expert_vocab_tgt.encode_line(r, add_if_not_exist=False)
             for hypo in hypos_i:
                 if student:
                     h = self.expert_vocab_tgt.string(utils.strip_pad(hypo['tokens'][:-1], self.pad_idx).int().cpu(),
-                                                     bpe_symbol='fastBPE').split()
+                                                     bpe_symbol='fastBPE')#.split()
                 else:
                     h = self.expert_vocab_tgt.string(
                         utils.strip_pad(hypo['tokens'], self.pad_idx).int().cpu(),
                         bpe_symbol='fastBPE'
-                    ).split()
-                #h = self.expert_vocab_tgt.encode_line(h, add_if_not_exist=False)
+                    )#.split()
+                h = self.expert_vocab_tgt.encode_line(h, add_if_not_exist=False)
 
+                """
                 score = sentence_bleu(
                     [r],
                     h
                 )
                 hypo['bleu'] = score
-
+                """
                 # use +1 smoothing for sentence BLEU
-                #hypo['bleu'] = self._scorer.score(r, h)
+                hypo['bleu'] = self._scorer.score(r, h)
         return hypos
 
     def prepare_sample_and_hypotheses(self, sample, hypos, student=False):
