@@ -103,7 +103,7 @@ def imit_kd_loss(
         "id": generated_dataset["id"],
         "net_input": {
             "src_tokens": source_text.cuda(),
-            "src_lengths": source_lengths,
+            "src_lengths": torch.tensor(source_lengths),
             "prev_output_tokens": generated_dataset["net_input"]["prev_output_tokens"].cuda()
         },
         "target": generated_dataset["target"],

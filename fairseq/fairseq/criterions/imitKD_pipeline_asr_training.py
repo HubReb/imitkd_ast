@@ -9,6 +9,8 @@ import copy
 
 from torch.distributions import Categorical
 import torch
+
+import fairseq.utils
 import fastBPE
 
 from fairseq import metrics, utils
@@ -18,7 +20,8 @@ from fairseq.checkpoint_utils import load_model_ensemble
 from fairseq.data import Dictionary
 from fairseq.sequence_generator import SequenceGenerator
 from fairseq.scoring import bleu
-
+from torch.nn.functional import gumbel_softmax, log_softmax
+from torch import multinomial
 
 @dataclass
 class ImitKD_pipeline_asr_trainingConfig(FairseqDataclass):
@@ -96,9 +99,11 @@ def imit_kd_loss(
         expert_logits = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=False)
         pad_mask = expert_logits.eq(ignore_index)
         expert_logits.masked_fill_(pad_mask, 0.0)
-    asr_ouput = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
-    asr_ouput = asr_ouput.argmax(-1)
-    asr_output_list = asr_ouput.tolist()
+    asr_output_logs = log_softmax(model(**generated_dataset["net_input"])[0], dim=-1)
+    asr_output_gumbel = gumbel_softmax(asr_output_logs, tau=1, hard=True, dim=-1)
+    asr_output = asr_output_gumbel.argmax(axis=-1)
+    #asr_output = asr_output.argmax(-1)
+    asr_output_list = asr_output.tolist()
     asr_output_list_lengths = []
     for l in asr_output_list:
         try:
@@ -106,12 +111,12 @@ def imit_kd_loss(
         except ValueError:
             eos_index = len(l)
         if eos_index == 0:
-            eos_index = 1       # else forward pass of nmt model fails (should never be zero, but at begin ASR Model puts out nonsense...)  
+            eos_index = 1  # else forward pass of nmt model fails (should never be zero, but at begin ASR Model puts out nonsense...)
         asr_output_list_lengths.append(eos_index)
-    new_sample["net_input"]["src_tokens"] = asr_ouput
+    new_sample["net_input"]["src_tokens"] = asr_output
     new_sample["net_input"]["src_lengths"] = torch.tensor(asr_output_list_lengths, device="cuda")
     lprobs = nmt_model.get_normalized_probs(nmt_model(**new_sample["net_input"]), log_probs=True)
-    return -torch.sum(expert_logits * lprobs)
+    return torch.sum(expert_logits * lprobs) * (asr_output_gumbel * asr_output_logs).sum()
 
 
 @register_criterion(
@@ -147,8 +152,12 @@ class ImitKD_pipeline_asr_training(FairseqCriterion):
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
         self.beta = beta
-        self.nmt_model_ensemble, _ = load_model_ensemble([nmt_model], arg_overrides={"data": path_nmt_model, "encoder_freezing_updates": 0})
+        self.nmt_model_ensemble, _ = load_model_ensemble([nmt_model], arg_overrides={"data": path_nmt_model,
+                                                                                     "encoder_freezing_updates": 0})
         self.nmt_model = copy.deepcopy(self.nmt_model_ensemble[-1])
+        for p in self.nmt_model.parameters():
+            p.require_grad = False
+
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
@@ -158,11 +167,12 @@ class ImitKD_pipeline_asr_training(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
         self.nmt_model = copy.deepcopy(self.nmt_model_ensemble[-1])
+        source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
         sample, new_sample = self.generate_imit_batch(model, sample, source_text)
         net_output = self.nmt_model(**new_sample["net_input"])
-        loss = self.compute_loss(model, net_output, sample, source_text, source_lengths, new_sample, reduce=reduce, valid=valid)
+        loss = self.compute_loss(model, net_output, sample, source_text, source_lengths, new_sample, reduce=reduce,
+                                 valid=valid)
         sample_size = (
             sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
         )
@@ -172,7 +182,6 @@ class ImitKD_pipeline_asr_training(FairseqCriterion):
             "nsentences": sample["target"].size(0),
             "sample_size": sample_size,
         }
-
         return loss, sample_size, logging_output
 
     def get_lprobs_and_target(self, model, net_output, sample):
@@ -264,12 +273,14 @@ class ImitKD_pipeline_asr_training(FairseqCriterion):
         self.nmt_model.train()
         return sample, new_sample
 
-    def compute_loss(self, model, net_output, sample, source_text, source_lengths, new_sample, reduce=True, valid=False):
+    def compute_loss(self, model, net_output, sample, source_text, source_lengths, new_sample, reduce=True,
+                     valid=False):
         if valid:
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.padding_idx, reduce=reduce)
         else:
-            loss = imit_kd_loss(sample, source_text, model, self.nmt_model, self.expert, source_lengths, new_sample, self.eos, self.pad_idx)
+            loss = imit_kd_loss(sample, source_text, model, self.nmt_model, self.expert, source_lengths, new_sample,
+                                self.eos, self.pad_idx)
         return loss
 
     @classmethod
@@ -328,7 +339,7 @@ class ImitKD_pipeline_asr_training(FairseqCriterion):
                 h = self.dict.string(hypo['tokens'].int().cpu(), bpe_symbol='fastBPE')
                 h = self.dict.encode_line(h, add_if_not_exist=False)
                 # use +1 smoothing for sentence BLEU
-                hypo['bleu'] = self._scorer.score(r, h)/100
+                hypo['bleu'] = self._scorer.score(r, h) / 100
         return hypos
 
     def transform_source_tokens_into_expert_voc(self, sample, eos_at_beginning=False):
@@ -392,4 +403,3 @@ class BleuScorer(object):
         self._scorer.reset(one_init=True)
         self._scorer.add(ref, hypo)
         return self._scorer.score()
-    

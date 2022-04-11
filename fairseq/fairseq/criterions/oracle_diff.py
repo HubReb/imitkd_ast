@@ -57,6 +57,14 @@ class OracleDiffConfig(FairseqDataclass):
         default=False,
         metadata={"help":"whether to use Luca Hormann's ADBLEU loss instead of AGGREVATEs BSE"}
     )
+    asr_model: str = field(
+        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/europarl_asr.pt",
+        metadata={"help": "asr model"}
+    )
+    path_asr_model: str = field(
+        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/v1.1",
+        metadata={"help": "path to ASR model"}
+    )
 
 
 def valid_loss(lprobs, target, ignore_index=None, reduce=True):
@@ -124,6 +132,8 @@ class OracleDiff(FairseqCriterion):
             path,
             bpe_codes,
             adbleu_loss,
+            asr_model,
+            path_asr_model,
             ignore_prefix_size=0,
             report_accuracy=False,
     ):
@@ -149,6 +159,9 @@ class OracleDiff(FairseqCriterion):
         self.sentence_avg = False
         self.adbleu_loss = adbleu_loss
         self._scorer = BleuScorer(self.pad_idx, self.eos, self.dict.unk())
+        self.asr_model, _ = load_model_ensemble([asr_model], arg_overrides={"data": path_asr_model, "encoder_freezing_updates": 0})
+        self.asr_model = self.asr_model[-1]
+        self.asr_model = self.asr_model.eval()
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
@@ -198,9 +211,9 @@ class OracleDiff(FairseqCriterion):
             r_expert, r_student = 0, 0
         else:
             source_text, source_lens = self.transform_source_tokens_into_expert_voc(sample)
-            expert_input, texts, cut_texts, indices, student_hypos, original_student_hypos = self.get_student_predictions_and_pass_to_expert(
+            expert_input, texts, cut_texts, indices, student_hypos, original_student_hypos, asr_transcriptions, source_lengths = self.get_student_predictions_and_pass_to_expert(
                 model, sample)
-            expert_output_samples = self.get_expert_output(sample, source_text, source_lens, expert_input)
+            expert_output_samples = self.get_expert_output(sample, source_text, source_lens, expert_input, asr_transcriptions, source_lengths)
             scores, sample_student, sample_expert, lengths, original_student_hypos = self.get_hypos_and_scores(sample, lprobs,
                                                                                        expert_output_samples,
                                                                                        student_hypos,
@@ -212,7 +225,7 @@ class OracleDiff(FairseqCriterion):
                 sample_expert,
                 indices,
                 self.adbleu_loss,
-                original_student_hypos
+                original_student_hypos,
             )
         return loss, r_expert, r_student
 
@@ -345,28 +358,28 @@ class OracleDiff(FairseqCriterion):
         target = sample['target'].data.int()
         for i, hypos_i in enumerate(hypos):
             ref = utils.strip_pad(target[i, :], self.pad_idx).cpu()
-            r = self.dict.string(ref, bpe_symbol='fastBPE', escape_unk=True)#.split()
-            r = self.expert_vocab_tgt.encode_line(r, add_if_not_exist=False)
+            r = self.dict.string(ref, bpe_symbol='fastBPE', escape_unk=True).split()
+            #r = self.expert_vocab_tgt.encode_line(r, add_if_not_exist=False)
             for hypo in hypos_i:
                 if student:
                     h = self.expert_vocab_tgt.string(utils.strip_pad(hypo['tokens'][:-1], self.pad_idx).int().cpu(),
-                                                     bpe_symbol='fastBPE')#.split()
+                                                     bpe_symbol='fastBPE').split()
                 else:
                     h = self.expert_vocab_tgt.string(
                         utils.strip_pad(hypo['tokens'], self.pad_idx).int().cpu(),
                         bpe_symbol='fastBPE'
-                    )#.split()
-                h = self.expert_vocab_tgt.encode_line(h, add_if_not_exist=False)
+                    ).split()
+                #h = self.expert_vocab_tgt.encode_line(h, add_if_not_exist=False)
 
-                """
+
                 score = sentence_bleu(
                     [r],
                     h
                 )
                 hypo['bleu'] = score
-                """
+
                 # use +1 smoothing for sentence BLEU
-                hypo['bleu'] = self._scorer.score(r, h)
+                #hypo['bleu'] = self._scorer.score(r, h)
         return hypos
 
     def prepare_sample_and_hypotheses(self, sample, hypos, student=False):
@@ -387,24 +400,36 @@ class OracleDiff(FairseqCriterion):
 
     def get_student_predictions_and_pass_to_expert(self, model, sample):
         with torch.no_grad():
-            student_predictions = []
-            model = model.eval()
-            targets = sample["net_input"]["prev_output_tokens"].data.tolist()
-            sample["net_input"].pop("src_text", None)
-            net_output = model.get_normalized_probs(model(**sample["net_input"]), log_probs=True)
-            top_k_predictions = torch.topk(net_output, k=5, dim=-1).indices
-            max_length = max([len(i) for i in targets])  # let's avoid blowing up the GPU RAM, shall we?
-            student_generator = SequenceGenerator([model], self.dict, beam_size=1, max_len=max_length)
+            student = model.eval()
+            prev_output_tokens = sample["net_input"]["prev_output_tokens"].data.tolist()
+            sample["net_input"].pop("src_text")
+            max_length = max([len(i) for i in prev_output_tokens])  # let's avoid blowing up the GPU RAM, shall we?
+            student_generator = SequenceGenerator([student], self.dict, beam_size=1, max_len=max_length)
+            asr_generator = SequenceGenerator([self.asr_model], self.dict, beam_size=1, max_len=max_length)
             student_generator.cuda()
+            student_hypos = student_generator._generate(sample)
+            transcription_hypos = asr_generator._generate(sample)
+            transcriptions = []
+            lengths = []
             self.beta = 0.1
             dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
             samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
-            hypos = student_generator._generate(sample)
-            original_hypos = copy.deepcopy(hypos)
+            original_hypos = copy.deepcopy(student_hypos)
             texts = []
             indices = []
             cut_texts = []
-            for i, prediction in enumerate(hypos):
+            student_predictions = []
+            for i, h in enumerate(transcription_hypos):
+                transcriptions.append(h[0]["tokens"])
+                lengths.append(len(h[0]["tokens"]))
+            transcriptions = collate_tokens(
+                transcriptions,
+                self.dict.pad(),
+                self.dict.eos(),
+                left_pad=False,
+                move_eos_to_beginning=False
+            ).cuda()
+            for i, prediction in enumerate(student_hypos):
                 max_range = len(prediction[0]["tokens"]) - 1
                 if max_range <= 1:
                     index = 1
@@ -413,14 +438,14 @@ class OracleDiff(FairseqCriterion):
                 indices.append(index)
                 if samp_mask[i]:
                     student_predictions.append(prediction[0]["tokens"][:index+1])
-                    hypos[i][0]["tokens"] = prediction[0]["tokens"][:index+1].cuda()
+                    student_hypos[i][0]["tokens"] = prediction[0]["tokens"][:index+1].cuda()
                 else:
                     new_hypo = torch.tensor(
                         prediction[0]["tokens"][:index].data.tolist() +
-                        [choice(top_k_predictions[i][index].tolist())]
+                        [choice(list(self.expert_vocab_tgt.indices.values()))]
                     )
                     student_predictions.append(new_hypo)
-                    hypos[i][0]["tokens"] = new_hypo.cuda()
+                    student_hypos[i][0]["tokens"] = new_hypo.cuda()
 
             expert_input = self.collate_tokens(
                 student_predictions,
@@ -430,7 +455,7 @@ class OracleDiff(FairseqCriterion):
                 move_eos_to_beginning=False
             )
         model = model.train()
-        return expert_input, texts, cut_texts, indices, hypos, original_hypos
+        return expert_input, texts, cut_texts, indices, student_hypos, original_hypos, transcriptions, lengths
 
     def transform_source_tokens_into_expert_voc(self, sample):
         source_text = sample["net_input"]["src_text"]
@@ -459,7 +484,10 @@ class OracleDiff(FairseqCriterion):
         )
         return source_text, src_lengths
 
-    def get_expert_output(self, sample, source_texts, source_lens, expert_input):
+    def get_expert_output(self, sample, source_texts, source_lens, expert_input, transcriptions, source_lengths):
+        sample_expert = copy.deepcopy(sample)
+        sample_expert["net_input"]["src_tokens"] = transcriptions.cuda()
+        sample_expert["net_input"]["src_lengths"] = source_lengths
         targets = sample["net_input"]["prev_output_tokens"].data.tolist()
         max_length = max([len(i) for i in targets])  # let's avoid blowing up the GPU RAM, shall we?
         out = {
