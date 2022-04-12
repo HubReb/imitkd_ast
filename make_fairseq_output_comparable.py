@@ -40,20 +40,23 @@ def check_if_folder_exits_or_create(foldername):
     os.makedirs(foldername)
 
 
-def run(source_filename, translation_filenames):
-    assert "source" in source_filename
+def run(source_filenames, translation_filenames):
+    source_data = []
+    for source_filename in source_filenames:
+        assert "source" in source_filename
+        source_data.append(read_file(source_filename))
     foldername = "/home/rebekka/reordered_hypos"
     print(foldername)
     check_if_folder_exits_or_create(foldername)
     original_data = []
     for filename in translation_filenames:
+        print(filename)
         original_data.append(read_file(filename))
-    source_data = read_file(source_filename)
     dictionary_list = []
     for index, data_stream in enumerate(original_data):
         assert "hypo" in translation_filenames[index]
-        dictionary_list.append(combine_source_and_hypothesis_in_dictionary(source_data, data_stream))
-    new_hypo_data = sort_data_streams(source_data, dictionary_list)
+        dictionary_list.append(combine_source_and_hypothesis_in_dictionary(source_data[index], data_stream))
+    new_hypo_data = sort_data_streams(source_data[0], dictionary_list)
     for index, data in enumerate(new_hypo_data):
         write_data_to_file(translation_filenames[index], data)
 
@@ -61,7 +64,7 @@ def run(source_filename, translation_filenames):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="handle different orders of fairseq-generate outputs")
-    parser.add_argument('-s', '--source_references', help="file containing the reference sentences line by line", required=True)
+    parser.add_argument('-s', '--source_references', nargs='+', help="files containing the reference sentences line by line", required=True)
     parser.add_argument('-t', '--translations', nargs='+', required=True)
     args = parser.parse_args()
     run(args.source_references, args.translations)
