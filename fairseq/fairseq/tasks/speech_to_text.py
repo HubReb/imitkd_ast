@@ -184,7 +184,6 @@ class SpeechToTextTask(LegacyFairseqTask):
     def valid_step(self, sample, model, criterion):
         model.eval()
         with torch.no_grad():
-            print(str(type(criterion)))
             if str(type(criterion)).endswith("OracleForcedDecoding'>"):
                 loss, sample_size, logging_output = criterion(model, sample, valid=True)
             elif str(type(criterion)).endswith("OracleForcedDecodingMNT'>"):
