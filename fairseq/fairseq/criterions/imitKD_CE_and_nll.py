@@ -210,11 +210,12 @@ class ImitKD(FairseqCriterion):
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.padding_idx, reduce=reduce)
         else:
-            lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
             sample_s = copy.deepcopy(sample)
             sample_s["net_input"].pop("src_text", None)
             generated_dataset = self.generate_imit_batch(model, sample_s)
+            net_output = model(**sample_s["net_input"])
+            lprobs, target = self.get_lprobs_and_target(model, net_output, sample_s)
             loss = imit_kd_loss(
                 generated_dataset,
                 model,
