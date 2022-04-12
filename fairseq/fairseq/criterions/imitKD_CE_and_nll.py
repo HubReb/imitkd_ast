@@ -124,8 +124,6 @@ def imit_kd_loss(
     if ignore_index is not None:
         pad_mask = target.eq(ignore_index)
         nll_loss.masked_fill_(pad_mask, 0.0)
-        total_rewards.masked_fill_(pad_mask, 0.0)
-        predicted_class_probs.masked_fill_(pad_mask, 0.0)
     # pad_mask = lprobs.eq(model_dict.pad())
     # lprobs.masked_fill_(pad_mask, 0.0)
     # kl_loss = kl_div(lprobs, expert_out, reduction="batchmean", log_target=True)
