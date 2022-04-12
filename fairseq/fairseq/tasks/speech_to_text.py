@@ -184,6 +184,7 @@ class SpeechToTextTask(LegacyFairseqTask):
     def valid_step(self, sample, model, criterion):
         model.eval()
         with torch.no_grad():
+            print(str(type(criterion)))
             if str(type(criterion)).endswith("OracleForcedDecoding'>"):
                 loss, sample_size, logging_output = criterion(model, sample, valid=True)
             elif str(type(criterion)).endswith("OracleForcedDecodingMNT'>"):
@@ -192,9 +193,9 @@ class SpeechToTextTask(LegacyFairseqTask):
                 loss, sample_size, logging_output = criterion(model, sample, valid=True)
             elif str(type(criterion)).endswith("Difference'>"):
                 loss, sample_size, logging_output = criterion(model, sample, valid=True)
-            elif str(type(criterion)).endswith("ImitKD'>"):
-                loss, sample_size, logging_output = criterion(model, sample, valid=True)
 
+            elif "ImitKD" in str(type(criterion)):
+                loss, sample_size, logging_output = criterion(model, sample, valid=True)
             else:
                 loss, sample_size, logging_output = criterion(model, sample)
         return loss, sample_size, logging_output
