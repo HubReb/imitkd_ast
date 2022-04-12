@@ -87,7 +87,8 @@ def imit_kd_loss(
         bpe,
         ignore_index,
         source_lengths,
-        target
+        target,
+        lprobs_for_nll
 ):
     """
     encoded_prevs = []
@@ -118,9 +119,9 @@ def imit_kd_loss(
         pad_mask = expert_out.eq(model_dict.pad())
         expert_out.masked_fill_(pad_mask, 0.0)
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
-    if target.dim() == lprobs.dim() - 1:
+    if target.dim() == lprobs_for_nll.dim() - 1:
         target = target.unsqueeze(-1)
-    nll_loss = -lprobs.gather(dim=-1, index=target)
+    nll_loss = -lprobs_for_nll.gather(dim=-1, index=target)
     if ignore_index is not None:
         pad_mask = target.eq(ignore_index)
         nll_loss.masked_fill_(pad_mask, 0.0)
@@ -209,7 +210,7 @@ class ImitKD(FairseqCriterion):
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.padding_idx, reduce=reduce)
         else:
-            _, target = self.get_lprobs_and_target(model, net_output, sample)
+            lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
             sample_s = copy.deepcopy(sample)
             sample_s["net_input"].pop("src_text", None)
@@ -224,7 +225,8 @@ class ImitKD(FairseqCriterion):
                 self.bpe,
                 self.padding_idx,
                 source_lengths,
-                target
+                target,
+                lprobs
             )
         return loss
 
