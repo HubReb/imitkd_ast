@@ -140,14 +140,13 @@ class ImitKD_pipeline_training_asr_input(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
+        source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
+        sample = self.generate_imit_batch(model, sample, valid)
+        sample_s = copy.deepcopy(sample)
+        sample_s["net_input"].pop("src_text", None)
         if valid:
-            sample["net_input"].pop("src_text", None)
             loss = self.compute_loss(model, sample, reduce=reduce, valid=valid)
         else:
-            source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
-            sample = self.generate_imit_batch(model, sample)
-            sample_s = copy.deepcopy(sample)
-            sample_s["net_input"].pop("src_text", None)
             net_output = model(**sample_s["net_input"])
             loss = self.compute_loss(model, net_output, sample, source_text, source_lengths, reduce=reduce, valid=valid)
         sample_size = (
@@ -185,7 +184,7 @@ class ImitKD_pipeline_training_asr_input(FairseqCriterion):
         total = torch.sum(mask)
         return n_correct, total
 
-    def generate_imit_batch(self, student, sample):
+    def generate_imit_batch(self, student, sample, valid):
         with torch.no_grad():
             student = student.eval()
             prev_output_tokens = sample["net_input"]["prev_output_tokens"].data.tolist()
@@ -209,6 +208,8 @@ class ImitKD_pipeline_training_asr_input(FairseqCriterion):
             ).cuda()
             sample["net_input"]["src_tokens"] = transcriptions
             sample["net_input"]["src_lengths"] = torch.tensor(lengths, device="cuda")
+            if valid:
+                return sample
             student_hypos = student_generator._generate(sample)
             dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
             samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
