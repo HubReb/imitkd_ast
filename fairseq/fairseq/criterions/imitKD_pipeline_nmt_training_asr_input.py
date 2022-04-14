@@ -140,12 +140,9 @@ class ImitKD_pipeline_training_asr_input(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        original_sample = copy.deepcopy(sample)
-        with torch.no_grad():
-            original_net_output = model(**sample["net_input"])
         if valid:
             sample["net_input"].pop("src_text", None)
-            loss = self.compute_loss(model, original_net_output, sample, reduce=reduce, valid=valid)
+            loss = self.compute_loss(model, sample, reduce=reduce, valid=valid)
         else:
             source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
             sample = self.generate_imit_batch(model, sample)
