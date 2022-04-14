@@ -143,11 +143,16 @@ class ImitKD_pipeline_nmt_training(FairseqCriterion):
         3) logging outputs to display while training
         """
         source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
-        sample = self.generate_imit_batch(model, sample)
-        sample_s = copy.deepcopy(sample)
-        sample_s["net_input"].pop("src_text", None)
-        net_output = model(**sample_s["net_input"])
-        loss = self.compute_loss(model, net_output, sample, source_text, source_lengths, reduce=reduce, valid=valid)
+        if not valid:
+            sample = self.generate_imit_batch(model, sample)
+            sample_s = copy.deepcopy(sample)
+            sample_s["net_input"].pop("src_text", None)
+            net_output = model(**sample_s["net_input"])
+            loss = self.compute_loss(model, net_output, sample, source_text, source_lengths, reduce=reduce, valid=valid)
+        else:
+            sample["net_input"].pop("src_text", None)
+            net_output = model(**sample["net_input"])
+            loss = self.compute_loss(model, net_output, sample, [], [], reduce=reduce, valid=valid)
         sample_size = (
             sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
         )

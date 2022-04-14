@@ -140,15 +140,22 @@ class ImitKD_pipeline_training_asr_input(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
-        sample = self.generate_imit_batch(model, sample)
-        sample_s = copy.deepcopy(sample)
-        sample_s["net_input"].pop("src_text", None)
-        net_output = model(**sample_s["net_input"])
-        loss = self.compute_loss(model, net_output, sample, source_text, source_lengths, reduce=reduce, valid=valid)
+        original_sample = copy.deepcopy(sample)
+        with torch.no_grad():
+            original_net_output = model(**sample["net_input"])
+        if valid:
+            sample["net_input"].pop("src_text", None)
+            loss = self.compute_loss(model, original_net_output, sample, reduce=reduce, valid=valid)
+        else:
+            source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
+            sample = self.generate_imit_batch(model, sample)
+            sample_s = copy.deepcopy(sample)
+            sample_s["net_input"].pop("src_text", None)
+            net_output = model(**sample_s["net_input"])
+            loss = self.compute_loss(model, net_output, sample, source_text, source_lengths, reduce=reduce, valid=valid)
         sample_size = (
-            sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
-        )
+           sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
+            )
         logging_output = {
             "loss": loss.data,
             "ntokens": sample["ntokens"],
@@ -227,7 +234,7 @@ class ImitKD_pipeline_training_asr_input(FairseqCriterion):
         student.train()
         return sample
 
-    def compute_loss(self, model, net_output, sample, source_text, source_lengths, reduce=True, valid=False):
+    def compute_loss(self, model, net_output, sample, source_text=None, source_lengths=None, reduce=True, valid=False):
         if valid:
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.padding_idx, reduce=reduce)
