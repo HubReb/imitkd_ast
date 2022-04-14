@@ -147,7 +147,8 @@ class ImitKD_pipeline_nmt_training(FairseqCriterion):
         sample_s = copy.deepcopy(sample)
         sample_s["net_input"].pop("src_text", None)
         if valid:
-            loss = self.compute_loss(model, sample, reduce=reduce, valid=valid)
+            net_output = model(**sample_s["net_input"])
+            loss = self.compute_loss(model, net_output, sample, [], [], reduce=reduce, valid=valid)
         else:
             net_output = model(**sample_s["net_input"])
             loss = self.compute_loss(model, net_output, sample, source_text, source_lengths, reduce=reduce, valid=valid)
