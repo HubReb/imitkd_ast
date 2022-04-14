@@ -197,9 +197,9 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
             source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
             sample_s = copy.deepcopy(sample)
             sample_s["net_input"].pop("src_text", None)
-            generated_dataset = self.generate_with_expert_copy(model, sample_s)
+            #generated_dataset = self.generate_with_expert_copy(model, sample_s)
             loss = imit_kd_loss(
-                generated_dataset,
+                sample_s,
                 model,
                 self.expert,
                 source_text,
