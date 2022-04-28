@@ -7,11 +7,9 @@ import math
 from dataclasses import dataclass, field
 import copy
 
-import sentencepiece as spm
-import fastBPE
 
+import fastBPE
 import torch
-from torch.nn.functional import kl_div
 from torch.distributions import Categorical
 
 from fairseq import metrics, utils
@@ -20,8 +18,6 @@ from fairseq.dataclass import FairseqDataclass
 from fairseq.checkpoint_utils import load_model_ensemble
 from fairseq.data import Dictionary
 from fairseq.sequence_generator import SequenceGenerator
-from nltk.translate.bleu_score import sentence_bleu
-
 
 
 @dataclass
@@ -113,7 +109,6 @@ def imit_kd_loss(
     # kl_loss = kl_div(lprobs, expert_out, reduction="batchmean", log_target=True)
     # good old CE
     return -torch.sum(expert_out * lprobs)
-
 
 
 @register_criterion(
