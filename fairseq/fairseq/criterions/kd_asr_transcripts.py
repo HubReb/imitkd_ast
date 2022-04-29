@@ -6,18 +6,18 @@
 import math
 from dataclasses import dataclass, field
 import copy
+from typing import List, Tuple, Dict
 
-from torch.distributions import Categorical
 import torch
 import fastBPE
 
+import fairseq
 from fairseq import metrics, utils
 from fairseq.criterions import FairseqCriterion, register_criterion
 from fairseq.dataclass import FairseqDataclass
 from fairseq.checkpoint_utils import load_model_ensemble
 from fairseq.data import Dictionary
 from fairseq.sequence_generator import SequenceGenerator
-from fairseq.scoring import bleu
 
 
 @dataclass
@@ -33,10 +33,6 @@ class ImitKDConfig(FairseqDataclass):
     ignore_prefix_size: int = field(
         default=0,
         metadata={"help": "Ignore first N tokens"},
-    )
-    beta: int = field(
-        default=1,
-        metadata={"help": "replacement prop"},
     )
     expert_vocab_tgt: str = field(
         default="wmt19.en-de.joined-dict.ensemble/dict.de.txt",
@@ -64,7 +60,12 @@ class ImitKDConfig(FairseqDataclass):
     )
 
 
-def valid_loss(lprobs, target, ignore_index=None, reduce=True):
+def valid_loss(
+        lprobs: torch.FloatTensor,
+        target: torch.IntTensor,
+        ignore_index: int = None,
+        reduce: bool = True
+) -> torch.FloatTensor:
     if target.dim() == lprobs.dim() - 1:
         target = target.unsqueeze(-1)
     nll_loss = -lprobs.gather(dim=-1, index=target)
@@ -78,14 +79,26 @@ def valid_loss(lprobs, target, ignore_index=None, reduce=True):
     return nll_loss
 
 
-def imit_kd_loss(
-        generated_dataset,
-        transcriptions,
-        model,
-        expert,
-        source_lengths,
-        ignore_index,
-):
+def kl_loss(
+        generated_dataset: Dict,
+        transcriptions: torch.IntTensor,
+        model: fairseq.models.FairseqModel,
+        expert: fairseq.models.FairseqModel,
+        source_lengths: torch.FloatTensor,
+        ignore_index: int,
+) -> torch.FloatTensor:
+    """
+    Calculate Cross-Entropy loss between expert and student model.
+
+    :rtype: torch.FloatTensor
+    :param generated_dataset: dictionary containing all information of the batch of the dataset (net input, target values,...)
+    :param transcriptions: Transcript of the input audio features to use as source text input for the expert
+    :param model: model to be trained
+    :param expert: expert for the knowledge distillation
+    :param source_lengths: lengths of the transcripts
+    :param ignore_index: index of pad values
+    :return: Cross-Entropy loss between expert and model
+    """
     sample_expert = copy.deepcopy(generated_dataset)
     sample_expert["net_input"]["src_tokens"] = transcriptions.cuda()
     sample_expert["net_input"]["src_lengths"] = source_lengths
@@ -110,7 +123,6 @@ class ImitKD(FairseqCriterion):
             path,
             asr_model,
             path_asr_model,
-            beta,
             bpe_codes,
             ignore_prefix_size=0,
             report_accuracy=False,
@@ -129,7 +141,6 @@ class ImitKD(FairseqCriterion):
         self.bpe = fastBPE.fastBPE(bpe_codes, expert_vocab_tgt)
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
-        self.beta = beta
         self.asr_model, _ = load_model_ensemble([asr_model], arg_overrides={"data": path_asr_model, "encoder_freezing_updates": 0})
         self.asr_model = self.asr_model[-1]
         self.asr_model = self.asr_model.eval()
@@ -148,7 +159,7 @@ class ImitKD(FairseqCriterion):
             sample["net_input"].pop("src_text", None)
             loss = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
         else:
-            sample, asr_transcriptions, source_lengths = self.generate_imit_batch(model, sample)
+            sample, asr_transcriptions, source_lengths = self.generate_audio_transcripts(sample)
             sample_s = copy.deepcopy(sample)
             sample_s["net_input"].pop("src_text", None)
             net_output = model(**sample_s["net_input"])
@@ -191,9 +202,15 @@ class ImitKD(FairseqCriterion):
         total = torch.sum(mask)
         return n_correct, total
 
-    def generate_imit_batch(self, student, sample):
+    def generate_audio_transcripts(self,
+                                   sample: Dict
+                                   ) -> Tuple[Dict, torch.IntTensor, List[int]]:
+        """
+        Use ASR model (self.asr_model) to transcribe the audio data in sample.
+        :param sample: dataset batch to train on
+        :return: dataset batch and corresponding asr model transcriptions of dataset batch's audio features
+        """
         with torch.no_grad():
-            student = student.eval()
             prev_output_tokens = sample["net_input"]["prev_output_tokens"].data.tolist()
             sample["net_input"].pop("src_text")
             max_length = max([len(i) for i in prev_output_tokens])  # let's avoid blowing up the GPU RAM, shall we?
@@ -212,7 +229,6 @@ class ImitKD(FairseqCriterion):
                 move_eos_to_beginning=False
             ).cuda()
             sample["net_input"].pop("src_text", None)
-        student.train()
         return sample, transcriptions, lengths
 
     def compute_loss(self, model, net_output, sample, transcriptions=None, source_lengths=None, reduce=True, valid=False):
@@ -220,7 +236,7 @@ class ImitKD(FairseqCriterion):
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.padding_idx, reduce=reduce)
         else:
-            loss = imit_kd_loss(sample, transcriptions, model, self.expert, source_lengths, self.pad_idx)
+            loss = kl_loss(sample, transcriptions, model, self.expert, source_lengths, self.pad_idx)
         return loss
 
     @classmethod
@@ -258,31 +274,17 @@ class ImitKD(FairseqCriterion):
         """
         return True
 
-    def add_bleu_to_hypotheses(self, sample, hypos):
-        """Add BLEU scores to the set of hypotheses.
-
-        This can be called from prepare_sample_and_hypotheses.
+    def transform_source_tokens_into_expert_voc(
+            self,
+            sample: Dict,
+            eos_at_beginning: bool = False
+    ) -> Tuple[torch.IntTensor, List[int]]:
         """
-        if 'includes_bleu' in sample:
-            return hypos
-        sample['includes_bleu'] = True
-
-        if self._scorer is None:
-            self.create_sequence_scorer()
-
-        target = sample['target'].data.int()
-        for i, hypos_i in enumerate(hypos):
-            ref = utils.strip_pad(target[i, :], self.pad_idx).cpu()
-            r = self.dict.string(ref, bpe_symbol='fastBPE', escape_unk=True)
-            r = self.dict.encode_line(r, add_if_not_exist=False)
-            for hypo in hypos_i:
-                h = self.dict.string(hypo['tokens'].int().cpu(), bpe_symbol='fastBPE')
-                h = self.dict.encode_line(h, add_if_not_exist=False)
-                # use +1 smoothing for sentence BLEU
-                hypo['bleu'] = self._scorer.score(r, h)/100
-        return hypos
-
-    def transform_source_tokens_into_expert_voc(self, sample, eos_at_beginning=False):
+        Turn the tokenized source text into bpe encodings.
+        :param sample: dataset batch
+        :param eos_at_beginning: whether to put EOS token at the beginning of each sample (required for previous output tokens)
+        :return: Tuple of bpe encoded source text and list of integers determing the number of bp for each sample
+        """
         source_text = sample["net_input"]["src_text"]
         source_texts = []
         for line in source_text:
@@ -329,18 +331,3 @@ def collate_tokens(values, pad_idx, eos, left_pad, move_eos_to_beginning):
         else:
             copy_tensor(v, res[i][:len(v)])
     return res
-
-
-class BleuScorer(object):
-
-    def __init__(self, pad, eos, unk):
-        from collections import namedtuple
-        cfg_f = namedtuple('cfg_f', ['pad', 'eos', 'unk'])
-        cfg = cfg_f(pad, eos, unk)
-        self._scorer = bleu.Scorer(cfg)
-
-    def score(self, ref, hypo):
-        self._scorer.reset(one_init=True)
-        self._scorer.add(ref, hypo)
-        return self._scorer.score()
-    
