@@ -6,6 +6,7 @@
 import math
 from dataclasses import dataclass, field
 import copy
+from typing import List, Tuple, Dict, Callable
 
 import sentencepiece as spm
 import fastBPE
@@ -20,6 +21,7 @@ from fairseq.dataclass import FairseqDataclass
 from fairseq.checkpoint_utils import load_model_ensemble
 from fairseq.data import Dictionary
 from fairseq.sequence_generator import SequenceGenerator
+from fairseq.criterions.helper_functions import valid_loss, collate_tokens
 
 
 @dataclass
@@ -57,24 +59,6 @@ class ImitKDConfig(FairseqDataclass):
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
         metadata={"help": "expert's bpe codes"},
     )
-    data_mix_rate: int = field(
-        default=1,
-        metadata={"help": "number of step to run before updating the model;s parameters"},
-    )
-
-
-def valid_loss(lprobs, target, ignore_index=None, reduce=True):
-    if target.dim() == lprobs.dim() - 1:
-        target = target.unsqueeze(-1)
-    nll_loss = -lprobs.gather(dim=-1, index=target)
-    if ignore_index is not None:
-        pad_mask = target.eq(ignore_index)
-        nll_loss.masked_fill_(pad_mask, 0.0)
-    else:
-        nll_loss = nll_loss.squeeze(-1)
-    if reduce:
-        nll_loss = nll_loss.sum()
-    return nll_loss
 
 
 def imit_kd_loss(
@@ -83,22 +67,8 @@ def imit_kd_loss(
         expert,
         source_text,
         model_dict,
-        expert_vocab_tgt,
-        bpe,
-        ignore_index,
         source_lengths
 ):
-    """
-    encoded_prevs = []
-    for s in generated_dataset["net_input"]["prev_output_tokens"]:
-        encoded_prevs.append(model_dict.string(utils.strip_pad(s, model_dict.pad()),
-                                               bpe_symbol='sentencepiece_fastBPE',
-                                               escape_unk=True,
-                                               include_eos=False
-                                               )
-                             )
-    encoded_prevs = bpe.apply(encoded_prevs)
-    """
     sample_expert = {
         "id": generated_dataset["id"],
         "net_input": {
@@ -137,13 +107,11 @@ class ImitKD(FairseqCriterion):
             path,
             beta,
             bpe_codes,
-            data_mix_rate,
             ignore_prefix_size=0,
             report_accuracy=False,
     ):
         super().__init__(task)
         self.ignore_prefix_size = ignore_prefix_size
-        self.data_mix_rate = data_mix_rate
         self.report_accuracy = report_accuracy
         self.expert, _ = load_model_ensemble([expert], arg_overrides={"data": path})
         self.expert = self.expert[-1]
@@ -212,14 +180,18 @@ class ImitKD(FairseqCriterion):
                 self.expert,
                 source_text,
                 self.dict,
-                self.expert_vocab_tgt,
-                self.bpe,
-                self.padding_idx,
                 source_lengths
             )
         return loss
 
-    def generate_imit_batch(self, student, sample):
+    def generate_imit_batch(self, student: Callable, sample: Dict) -> Dict:
+        """
+        Use student model to generate hypothesis if probability function beta yields 1.
+
+        :param student: model to train
+        :param sample: dataset batch
+        :return: dataset batch with prev_output_tokens == student hypothesis if beta_i = 1
+        """
         with torch.no_grad():
             student = student.eval()
             student_generator = SequenceGenerator([student], self.dict, beam_size=1)
@@ -297,7 +269,17 @@ class ImitKD(FairseqCriterion):
         """
         return True
 
-    def transform_source_tokens_into_expert_voc(self, sample):
+    def transform_source_tokens_into_expert_voc(
+            self,
+            sample: Dict,
+            eos_at_beginning: bool = False
+    ) -> Tuple[torch.IntTensor, List[int]]:
+        """
+        Turn the tokenized source text into bpe encodings.
+        :param sample: dataset batch
+        :param eos_at_beginning: whether to put EOS token at the beginning of each sample (required for previous output tokens)
+        :return: Tuple of bpe encoded source text and list of integers determing the number of bp for each sample
+        """
         source_text = sample["net_input"]["src_text"]
         source_texts = []
         for line in source_text:
@@ -320,27 +302,6 @@ class ImitKD(FairseqCriterion):
             self.expert_vocab_src.pad(),
             self.expert_vocab_src.eos(),
             left_pad=False,
-            move_eos_to_beginning=False
+            move_eos_to_beginning=eos_at_beginning
         )
         return source_text, src_lengths
-
-
-def collate_tokens(values, pad_idx, eos, left_pad, move_eos_to_beginning):
-    size = max(v.size(0) for v in values)
-    res = values[0].new(len(values), size).fill_(pad_idx)
-
-    def copy_tensor(src, dst):
-        assert dst.numel() == src.numel()
-        if move_eos_to_beginning:
-            assert src[-1] == eos
-            dst[0] = eos
-            dst[1:] = src[:-1]
-        else:
-            dst.copy_(src)
-
-    for i, v in enumerate(values):
-        if left_pad:
-            copy_tensor(v, res[i][size - len(v):])
-        else:
-            copy_tensor(v, res[i][:len(v)])
-    return res

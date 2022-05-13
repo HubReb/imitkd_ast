@@ -6,6 +6,7 @@
 import math
 from dataclasses import dataclass, field
 import copy
+from typing import List, Tuple, Dict, Callable
 
 from torch.distributions import Categorical
 import torch
@@ -18,10 +19,11 @@ from fairseq.checkpoint_utils import load_model_ensemble
 from fairseq.data import Dictionary
 from fairseq.sequence_generator import SequenceGenerator
 from fairseq.scoring import bleu
+from fairseq.criterions.helper_functions import valid_loss, collate_tokens
 
 
 @dataclass
-class ImitKD_pipeline_nmt_trainingConfig(FairseqDataclass):
+class ImitKDPipelineNmtTrainingConfig(FairseqDataclass):
     expert: str = field(
         default="checkpoint_best.pt",
         metadata={"help": "NMT model to use as expert"},
@@ -64,20 +66,6 @@ class ImitKD_pipeline_nmt_trainingConfig(FairseqDataclass):
     )
 
 
-def valid_loss(lprobs, target, ignore_index=None, reduce=True):
-    if target.dim() == lprobs.dim() - 1:
-        target = target.unsqueeze(-1)
-    nll_loss = -lprobs.gather(dim=-1, index=target)
-    if ignore_index is not None:
-        pad_mask = target.eq(ignore_index)
-        nll_loss.masked_fill_(pad_mask, 0.0)
-    else:
-        nll_loss = nll_loss.squeeze(-1)
-    if reduce:
-        nll_loss = nll_loss.sum()
-    return nll_loss
-
-
 def imit_kd_loss(
         generated_dataset,
         source_texts,
@@ -98,9 +86,9 @@ def imit_kd_loss(
 
 
 @register_criterion(
-    "imit_pipeline_nmt_training", dataclass=ImitKD_pipeline_nmt_trainingConfig
+    "imit_pipeline_nmt_training", dataclass=ImitKDPipelineNmtTrainingConfig
 )
-class ImitKD_pipeline_nmt_training(FairseqCriterion):
+class ImitKDPipelineNmtTraining(FairseqCriterion):
     def __init__(
             self,
             task,
@@ -187,7 +175,15 @@ class ImitKD_pipeline_nmt_training(FairseqCriterion):
         total = torch.sum(mask)
         return n_correct, total
 
-    def generate_imit_batch(self, student, sample, valid):
+    def generate_imit_batch(self, student: Callable, sample: Dict, valid: bool) -> Dict:
+        """
+        Use student model to generate hypothesis if probability function beta yields 1.
+
+        :param student: model to train
+        :param sample: dataset batch
+        :param valid: if true, we do not replace any prev_output_tokens with student hypotheses.
+        :return: dataset batch with prev_output_tokens == student hypothesis if beta_i = 1
+        """
         with torch.no_grad():
             student = student.eval()
             prev_output_tokens = sample["net_input"]["prev_output_tokens"].data.tolist()
@@ -278,31 +274,17 @@ class ImitKD_pipeline_nmt_training(FairseqCriterion):
         """
         return True
 
-    def add_bleu_to_hypotheses(self, sample, hypos):
-        """Add BLEU scores to the set of hypotheses.
-
-        This can be called from prepare_sample_and_hypotheses.
+    def transform_source_tokens_into_expert_voc(
+            self,
+            sample: Dict,
+            eos_at_beginning: bool = False
+    ) -> Tuple[torch.IntTensor, List[int]]:
         """
-        if 'includes_bleu' in sample:
-            return hypos
-        sample['includes_bleu'] = True
-
-        if self._scorer is None:
-            self.create_sequence_scorer()
-
-        target = sample['target'].data.int()
-        for i, hypos_i in enumerate(hypos):
-            ref = utils.strip_pad(target[i, :], self.pad_idx).cpu()
-            r = self.dict.string(ref, bpe_symbol='fastBPE', escape_unk=True)
-            r = self.dict.encode_line(r, add_if_not_exist=False)
-            for hypo in hypos_i:
-                h = self.dict.string(hypo['tokens'].int().cpu(), bpe_symbol='fastBPE')
-                h = self.dict.encode_line(h, add_if_not_exist=False)
-                # use +1 smoothing for sentence BLEU
-                hypo['bleu'] = self._scorer.score(r, h)/100
-        return hypos
-
-    def transform_source_tokens_into_expert_voc(self, sample, eos_at_beginning=False):
+        Turn the tokenized source text into bpe encodings.
+        :param sample: dataset batch
+        :param eos_at_beginning: whether to put EOS token at the beginning of each sample (required for previous output tokens)
+        :return: Tuple of bpe encoded source text and list of integers determing the number of bp for each sample
+        """
         source_text = sample["net_input"]["src_text"]
         source_texts = []
         for line in source_text:
@@ -328,39 +310,3 @@ class ImitKD_pipeline_nmt_training(FairseqCriterion):
             move_eos_to_beginning=eos_at_beginning
         )
         return source_text, src_lengths
-
-
-def collate_tokens(values, pad_idx, eos, left_pad, move_eos_to_beginning):
-    size = max(v.size(0) for v in values)
-    res = values[0].new(len(values), size).fill_(pad_idx)
-
-    def copy_tensor(src, dst):
-        assert dst.numel() == src.numel()
-        if move_eos_to_beginning:
-            assert src[-1] == eos
-            dst[0] = eos
-            dst[1:] = src[:-1]
-        else:
-            dst.copy_(src)
-
-    for i, v in enumerate(values):
-        if left_pad:
-            copy_tensor(v, res[i][size - len(v):])
-        else:
-            copy_tensor(v, res[i][:len(v)])
-    return res
-
-
-class BleuScorer(object):
-
-    def __init__(self, pad, eos, unk):
-        from collections import namedtuple
-        cfg_f = namedtuple('cfg_f', ['pad', 'eos', 'unk'])
-        cfg = cfg_f(pad, eos, unk)
-        self._scorer = bleu.Scorer(cfg)
-
-    def score(self, ref, hypo):
-        self._scorer.reset(one_init=True)
-        self._scorer.add(ref, hypo)
-        return self._scorer.score()
-    

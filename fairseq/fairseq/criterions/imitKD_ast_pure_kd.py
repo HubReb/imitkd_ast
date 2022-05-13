@@ -66,7 +66,7 @@ def imit_kd_loss(
 
 
 @register_criterion(
-    "imit_kd_ast", dataclass=ImitKDConfig
+    "imit_kd_ast_pure_kd", dataclass=ImitKDConfig
 )
 class ImitKDAST(FairseqCriterion):
     def __init__(
@@ -133,48 +133,9 @@ class ImitKDAST(FairseqCriterion):
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.padding_idx, reduce=reduce)
         else:
-            generated_dataset = self.generate_imit_batch(model, sample)
-            loss = imit_kd_loss(generated_dataset, model, self.expert, self.dict)
+            loss = imit_kd_loss(sample, model, self.expert, self.dict)
         return loss
 
-    def generate_imit_batch(self, student: Callable, sample: Dict) -> Dict:
-        """
-        Use student model to generate hypothesis if probability function beta yields 1.
-
-        :param student: model to train
-        :param sample: dataset batch
-        :return: dataset batch with prev_output_tokens == student hypothesis if beta_i = 1
-        """
-        with torch.no_grad():
-            student = student.eval()
-            student_generator = SequenceGenerator([student], self.dict, beam_size=1)
-            student_generator.cuda()
-            prev_output_tokens = sample["net_input"]["prev_output_tokens"].data.tolist()
-            max_length = max([len(i) for i in prev_output_tokens])  # let's avoid blowing up the GPU RAM, shall we?
-            student_generator = SequenceGenerator([student], self.dict, beam_size=1, max_len=max_length)
-            #  same  as cutting of hypothesis at [:max_length] after generation
-            student_generator.cuda()
-            hypos = student_generator._generate(sample)
-            dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
-            samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
-            for i, h in enumerate(hypos):
-                if samp_mask[i]:
-                    if h[0]["tokens"][-1] != self.dict.eos():
-                        prev_output_tokens[i] = torch.tensor([self.dict.eos()] + h[0]["tokens"].tolist())
-                    else:
-                        hypo = h[0]["tokens"].tolist()
-                        prev_output_tokens[i] = torch.tensor([hypo[-1]] + hypo[1:-1])
-                else:
-                    prev_output_tokens[i] = torch.tensor(prev_output_tokens[i])
-            sample["net_input"]["prev_output_tokens"] = collate_tokens(
-                prev_output_tokens,
-                self.dict.pad(),
-                self.dict.eos(),
-                left_pad=False,
-                move_eos_to_beginning=False
-            ).cuda()
-        student.train()
-        return sample
 
     def compute_accuracy(self, model, net_output, sample):
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)

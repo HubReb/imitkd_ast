@@ -18,7 +18,7 @@ from fairseq.dataclass import FairseqDataclass
 from fairseq.checkpoint_utils import load_model_ensemble
 from fairseq.data import Dictionary
 from fairseq.sequence_generator import SequenceGenerator
-
+from fairseq.criterions.helper_functions import valid_loss, collate_tokens
 
 @dataclass
 class ImitKDConfig(FairseqDataclass):
@@ -214,7 +214,7 @@ class ImitKD(FairseqCriterion):
             prev_output_tokens = sample["net_input"]["prev_output_tokens"].data.tolist()
             sample["net_input"].pop("src_text")
             max_length = max([len(i) for i in prev_output_tokens])  # let's avoid blowing up the GPU RAM, shall we?
-            asr_generator = SequenceGenerator([self.asr_model], self.dict, beam_size=1, max_len=max_length)
+            asr_generator = SequenceGenerator([self.asr_model], self.dict, beam_size=1, max_len=max_length).cuda()
             transcription_hypos = asr_generator._generate(sample)
             transcriptions = []
             lengths = []
@@ -312,22 +312,4 @@ class ImitKD(FairseqCriterion):
         return source_text, src_lengths
 
 
-def collate_tokens(values, pad_idx, eos, left_pad, move_eos_to_beginning):
-    size = max(v.size(0) for v in values)
-    res = values[0].new(len(values), size).fill_(pad_idx)
 
-    def copy_tensor(src, dst):
-        assert dst.numel() == src.numel()
-        if move_eos_to_beginning:
-            assert src[-1] == eos
-            dst[0] = eos
-            dst[1:] = src[:-1]
-        else:
-            dst.copy_(src)
-
-    for i, v in enumerate(values):
-        if left_pad:
-            copy_tensor(v, res[i][size - len(v):])
-        else:
-            copy_tensor(v, res[i][:len(v)])
-    return res

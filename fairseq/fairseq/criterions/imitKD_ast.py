@@ -6,7 +6,7 @@
 import math
 from dataclasses import dataclass, field
 import copy
-
+from typing import List, Tuple, Dict, Callable
 
 import torch
 from torch.distributions import Categorical
@@ -16,6 +16,7 @@ from fairseq.criterions import FairseqCriterion, register_criterion
 from fairseq.dataclass import FairseqDataclass
 from fairseq.checkpoint_utils import load_model_ensemble
 from fairseq.sequence_generator import SequenceGenerator
+from fairseq.criterions.helper_functions import valid_loss, collate_tokens
 
 
 @dataclass
@@ -41,20 +42,6 @@ class ImitKDConfig(FairseqDataclass):
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/covost/en/",
         metadata={"help": "directory with expert's dictionaries"},
     )
-
-
-def valid_loss(lprobs, target, ignore_index=None, reduce=True):
-    if target.dim() == lprobs.dim() - 1:
-        target = target.unsqueeze(-1)
-    nll_loss = -lprobs.gather(dim=-1, index=target)
-    if ignore_index is not None:
-        pad_mask = target.eq(ignore_index)
-        nll_loss.masked_fill_(pad_mask, 0.0)
-    else:
-        nll_loss = nll_loss.squeeze(-1)
-    if reduce:
-        nll_loss = nll_loss.sum()
-    return nll_loss
 
 
 def imit_kd_loss(
@@ -150,7 +137,14 @@ class ImitKDAST(FairseqCriterion):
             loss = imit_kd_loss(generated_dataset, model, self.expert, self.dict)
         return loss
 
-    def generate_imit_batch(self, student, sample):
+    def generate_imit_batch(self, student: Callable, sample: Dict) -> Dict:
+        """
+        Use student model to generate hypothesis if probability function beta yields 1.
+
+        :param student: model to train
+        :param sample: dataset batch
+        :return: dataset batch with prev_output_tokens == student hypothesis if beta_i = 1
+        """
         with torch.no_grad():
             student = student.eval()
             student_generator = SequenceGenerator([student], self.dict, beam_size=1)
@@ -179,7 +173,7 @@ class ImitKDAST(FairseqCriterion):
                 left_pad=False,
                 move_eos_to_beginning=False
             ).cuda()
-        student = student.train()
+        student.train()
         return sample
 
     def compute_accuracy(self, model, net_output, sample):
@@ -227,24 +221,3 @@ class ImitKDAST(FairseqCriterion):
         to True will improves distributed training speed.
         """
         return True
-
-
-def collate_tokens(values, pad_idx, eos, left_pad, move_eos_to_beginning):
-    size = max(v.size(0) for v in values)
-    res = values[0].new(len(values), size).fill_(pad_idx)
-
-    def copy_tensor(src, dst):
-        assert dst.numel() == src.numel()
-        if move_eos_to_beginning:
-            assert src[-1] == eos
-            dst[0] = eos
-            dst[1:] = src[:-1]
-        else:
-            dst.copy_(src)
-
-    for i, v in enumerate(values):
-        if left_pad:
-            copy_tensor(v, res[i][size - len(v):])
-        else:
-            copy_tensor(v, res[i][:len(v)])
-    return res

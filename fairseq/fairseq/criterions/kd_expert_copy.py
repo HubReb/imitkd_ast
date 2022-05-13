@@ -6,6 +6,7 @@
 import math
 from dataclasses import dataclass, field
 import copy
+from typing import List, Tuple, Dict
 
 import sentencepiece as spm
 import fastBPE
@@ -21,7 +22,7 @@ from fairseq.checkpoint_utils import load_model_ensemble
 from fairseq.data import Dictionary
 from fairseq.sequence_generator import SequenceGenerator
 from nltk.translate.bleu_score import sentence_bleu
-
+from fairseq.criterions.helper_functions import valid_loss, collate_tokens
 
 
 @dataclass
@@ -59,24 +60,7 @@ class ImitKDConfigCheckedPredictionsWithGoldReferencesCopy(FairseqDataclass):
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
         metadata={"help": "expert's bpe codes"},
     )
-    data_mix_rate: int = field(
-        default=1,
-        metadata={"help": "number of step to run before updating the model;s parameters"},
-    )
 
-
-def valid_loss(lprobs, target, ignore_index=None, reduce=True):
-    if target.dim() == lprobs.dim() - 1:
-        target = target.unsqueeze(-1)
-    nll_loss = -lprobs.gather(dim=-1, index=target)
-    if ignore_index is not None:
-        pad_mask = target.eq(ignore_index)
-        nll_loss.masked_fill_(pad_mask, 0.0)
-    else:
-        nll_loss = nll_loss.squeeze(-1)
-    if reduce:
-        nll_loss = nll_loss.sum()
-    return nll_loss
 
 
 def imit_kd_loss(
@@ -85,9 +69,6 @@ def imit_kd_loss(
         expert,
         source_text,
         model_dict,
-        expert_vocab_tgt,
-        bpe,
-        ignore_index,
         source_lengths,
 ):
     sample_expert = {
@@ -115,7 +96,6 @@ def imit_kd_loss(
     return -torch.sum(expert_out * lprobs)
 
 
-
 @register_criterion(
     "imit_kd_copy_expert", dataclass=ImitKDConfigCheckedPredictionsWithGoldReferencesCopy
 )
@@ -129,13 +109,11 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
             path,
             beta,
             bpe_codes,
-            data_mix_rate,
             ignore_prefix_size=0,
             report_accuracy=False,
     ):
         super().__init__(task)
         self.ignore_prefix_size = ignore_prefix_size
-        self.data_mix_rate = data_mix_rate
         self.report_accuracy = report_accuracy
         self.expert, _ = load_model_ensemble([expert], arg_overrides={"data": path})
         self.expert = self.expert[-1]
@@ -197,51 +175,15 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
             source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
             sample_s = copy.deepcopy(sample)
             sample_s["net_input"].pop("src_text", None)
-            #generated_dataset = self.generate_with_expert_copy(model, sample_s)
             loss = imit_kd_loss(
                 sample_s,
                 model,
                 self.expert,
                 source_text,
                 self.dict,
-                self.expert_vocab_tgt,
-                self.bpe,
-                self.padding_idx,
                 source_lengths,
             )
         return loss
-
-    def generate_with_expert_copy(self, student, sample):
-        with torch.no_grad():
-            student = student.eval()
-            targets = sample["net_input"]["prev_output_tokens"].data.tolist()
-            max_length = max([len(i) for i in targets])  # let's avoid blowing up the GPU RAM, shall we?
-            student_generator = SequenceGenerator([student], self.dict, beam_size=1, max_len=max_length)
-            #  same  as cutting of hypothesis at [:max_length] after generation
-            student_generator.cuda()
-            hypos = student_generator._generate(sample)
-            self.beta = 1
-            dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
-            samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
-            for i, h in enumerate(hypos):
-                if samp_mask[i]:
-                    if h[0]["tokens"][-1] != self.dict.eos():
-                        targets[i] = torch.tensor([self.dict.eos()] + h[0]["tokens"].tolist())
-                    else:
-                        hypo = h[0]["tokens"].tolist()
-                        targets[i] = torch.tensor([hypo[-1]] + hypo[1:-1])
-                else:
-                    targets[i] = torch.tensor(targets[i])
-            sample["net_input"]["prev_output_tokens"] = collate_tokens(
-                targets,
-                self.dict.pad(),
-                self.dict.eos(),
-                left_pad=False,
-                move_eos_to_beginning=False
-            ).cuda()
-            student.train()
-        return sample
-
 
     def compute_accuracy(self, model, net_output, sample):
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
@@ -289,7 +231,17 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
         """
         return True
 
-    def transform_source_tokens_into_expert_voc(self, sample):
+    def transform_source_tokens_into_expert_voc(
+            self,
+            sample: Dict,
+            eos_at_beginning: bool = False
+    ) -> Tuple[torch.IntTensor, List[int]]:
+        """
+        Turn the tokenized source text into bpe encodings.
+        :param sample: dataset batch
+        :param eos_at_beginning: whether to put EOS token at the beginning of each sample (required for previous output tokens)
+        :return: Tuple of bpe encoded source text and list of integers determing the number of bp for each sample
+        """
         source_text = sample["net_input"]["src_text"]
         source_texts = []
         for line in source_text:
@@ -312,27 +264,6 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
             self.expert_vocab_src.pad(),
             self.expert_vocab_src.eos(),
             left_pad=False,
-            move_eos_to_beginning=False
+            move_eos_to_beginning=eos_at_beginning
         )
         return source_text, src_lengths
-
-
-def collate_tokens(values, pad_idx, eos, left_pad, move_eos_to_beginning):
-    size = max(v.size(0) for v in values)
-    res = values[0].new(len(values), size).fill_(pad_idx)
-
-    def copy_tensor(src, dst):
-        assert dst.numel() == src.numel()
-        if move_eos_to_beginning:
-            assert src[-1] == eos
-            dst[0] = eos
-            dst[1:] = src[:-1]
-        else:
-            dst.copy_(src)
-
-    for i, v in enumerate(values):
-        if left_pad:
-            copy_tensor(v, res[i][size - len(v):])
-        else:
-            copy_tensor(v, res[i][:len(v)])
-    return res
