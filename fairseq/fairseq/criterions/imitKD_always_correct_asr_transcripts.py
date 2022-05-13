@@ -57,21 +57,29 @@ class ImitKDConfigCheckedPredictionsWithGoldReferencesAlwaysCorrect(FairseqDatac
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
         metadata={"help": "expert's bpe codes"},
     )
+    asr_model: str = field(
+        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/europarl_asr.pt",
+        metadata={"help": "asr model"}
+    )
+    path_asr_model: str = field(
+        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/v1.1",
+        metadata={"help": "path to ASR model"}
+    )
 
 
 def imit_kd_loss(
         generated_dataset,
         model,
         expert,
-        source_text,
         model_dict,
-        source_lengths
+        asr_transcriptions,
+        asr_lengths
 ):
     sample_expert = {
         "id": generated_dataset["id"],
         "net_input": {
-            "src_tokens": source_text.cuda(),
-            "src_lengths": source_lengths,
+            "src_tokens": asr_transcriptions.cuda(),
+            "src_lengths": asr_lengths,
             "prev_output_tokens": generated_dataset["net_input"]["prev_output_tokens"].cuda()
         },
         "target": generated_dataset["target"],
@@ -93,9 +101,9 @@ def imit_kd_loss(
 
 
 @register_criterion(
-    "imit_kd_always_correct", dataclass=ImitKDConfigCheckedPredictionsWithGoldReferencesAlwaysCorrect
+    "imit_kd_always_correct_asr_transcripts", dataclass=ImitKDConfigCheckedPredictionsWithGoldReferencesAlwaysCorrect
 )
-class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
+class ImitKDCheckedPredictionsWithASRTranscripts(FairseqCriterion):
     def __init__(
             self,
             task,
@@ -105,6 +113,8 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
             path,
             beta,
             bpe_codes,
+            asr_model,
+            path_asr_model,
             ignore_prefix_size=0,
             report_accuracy=False,
     ):
@@ -123,6 +133,9 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
         self.beta = beta
+        self.asr_model, _ = load_model_ensemble([asr_model], arg_overrides={"data": path_asr_model})
+        self.asr_model = self.asr_model[-1]
+        self.asr_model = self.asr_model.eval()
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
@@ -168,21 +181,21 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.padding_idx, reduce=reduce)
         else:
-            source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
+            # source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
             sample_s = copy.deepcopy(sample)
             sample_s["net_input"].pop("src_text", None)
-            generated_dataset = self.generate_with_always_correcting(model, sample_s)
+            generated_dataset, asr_transcriptions, asr_lengths = self.generate_with_always_correcting(model, sample_s)
             loss = imit_kd_loss(
                 generated_dataset,
                 model,
                 self.expert,
-                source_text,
                 self.dict,
-                source_lengths
+                asr_transcriptions,
+                asr_lengths
             )
         return loss
 
-    def generate_with_always_correcting(self, student: Callable, sample: Dict) -> Dict:
+    def generate_with_always_correcting(self, student: Callable, sample: Dict) -> Tuple[Dict, torch.FloatTensor, List[int]]:
         """
         Use student model to generate hypothesis if probability function beta yields 1.
 
@@ -195,6 +208,21 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
             targets = sample["net_input"]["prev_output_tokens"].data.tolist()
             max_length = max([len(i) for i in targets])  # let's avoid blowing up the GPU RAM, shall we?
             student_generator = SequenceGenerator([student], self.dict, beam_size=1, max_len=max_length)
+            asr_generator = SequenceGenerator([self.asr_model], self.dict, beam_size=1, max_len=max_length).cuda()
+            transcription_hypos = asr_generator._generate(sample)
+            transcriptions = []
+            lengths = []
+            for i, h in enumerate(transcription_hypos):
+                transcriptions.append(h[0]["tokens"])
+                lengths.append(len(h[0]["tokens"]))
+            transcriptions = collate_tokens(
+                transcriptions,
+                self.dict.pad(),
+                self.dict.eos(),
+                left_pad=False,
+                move_eos_to_beginning=False
+            ).cuda()
+
             #  same  as cutting of hypothesis at [:max_length] after generation
             student_generator.cuda()
             hypos = student_generator._generate(sample)
@@ -218,7 +246,7 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
                 move_eos_to_beginning=False
             ).cuda()
             student.train()
-        return sample
+        return sample, transcriptions, lengths
 
     def compute_accuracy(self, model, net_output, sample):
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
@@ -272,9 +300,9 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
             eos_at_beginning: bool = False
     ) -> Tuple[torch.IntTensor, List[int]]:
         """
-        Turn the tokenized source text into bpe encodings.
-        :param sample: dataset batch
-        :param eos_at_beginning: whether to put EOS token at the beginning of each sample (required for previous output tokens)
+        Turn the tokenized source text into bpe encodings. :param sample: dataset batch :param eos_at_beginning:
+        whether to put EOS token at the beginning of each sample (required for previous output tokens)
+
         :return: Tuple of bpe encoded source text and list of integers determing the number of bp for each sample
         """
         source_text = sample["net_input"]["src_text"]
