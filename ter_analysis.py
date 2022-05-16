@@ -4,7 +4,7 @@ from typing import List, Tuple
 from collections import defaultdict
 
 from sacrebleu.metrics.lib_ter import translation_edit_rate
-
+import pandas as pd
 
 def calculate_ter_score(hypothesis: str, reference: str) -> float:
     """
@@ -21,8 +21,8 @@ def calculate_ter_score(hypothesis: str, reference: str) -> float:
     return ter_score
 
 
-def calculate_ter_score_for_each_sentence_in_data(hypotheses: List[str], references: List[str]) -> List[
-        Tuple[float, str, str]]:
+def calculate_ter_score_for_each_sentence_in_data(hypotheses: List[str], references: List[str], ast_dataset_filename: str, asr_refs: List[str], asr_hypos: List[str]) -> List[
+        Tuple[float, str, str, str, str]]:
     """
     Calculate TER score for each hypothesis, reference pair available and rank each pair with decreasing TER score.
 
@@ -30,12 +30,22 @@ def calculate_ter_score_for_each_sentence_in_data(hypotheses: List[str], referen
     :param references: list of tokenized reference strings
     :return:  return elements sorted by decreasing TER score
     """
+    ast_dataset = pd.read_csv(ast_dataset_filename, sep="\t").filter(['tgt_text', 'src_text'], axis=1)
+    reference_to_transcript = dict(ast_dataset.values)
+    asr_refs_to_hypos = {}
+    for r, h in zip(asr_refs, asr_hypos):
+        asr_refs_to_hypos[r.strip()] = h
     ter_scores = defaultdict(tuple)
     for hypothesis, reference in zip(hypotheses, references):
+        asr_transcript = reference_to_transcript[reference]
+        try:
+            asr_hypo = asr_refs_to_hypos[asr_transcript.strip()]
+        except KeyError:
+            print(asr_transcript)
         ter_score = calculate_ter_score(hypothesis, reference)
-        ter_scores[ter_score] = (hypothesis, reference)
+        ter_scores[ter_score] = (hypothesis, reference, asr_transcript, asr_hypo)
     ranked_ter_score_list = sorted(
-        [(ter_score, hypothesis, reference) for ter_score, (hypothesis, reference) in ter_scores.items()],
+        [(ter_score, hypothesis, reference, asr_transcript, asr_hypo) for ter_score, (hypothesis, reference, asr_transcript, asr_hypo) in ter_scores.items()],
         key=lambda x: x[0],
         reverse=True)
     return ranked_ter_score_list
@@ -60,18 +70,21 @@ def compare_ter_scores(
         model1: str, model2: str
 ) -> str:
     comparisons = []
-    for (ter_score, hypo, ref) in ter_score_list_one:
-        for (ter_score_other, other_hypo, other_ref) in ter_score_list_two:
+    for (ter_score, hypo, ref, transcript, _) in ter_score_list_one:
+        for (ter_score_other, other_hypo, other_ref, other_transcript, asr_hypo) in ter_score_list_two:
             # we need to remove those to get ANYTHING OTHER than TO REMOVE and PLEASE REMOVE as highest TER samples
-            if "TO REMOVE" in ref or "PLEASE REMOVE" in ref:
+            if "TO REMOVE" in ref or "PLEASE REMOVE" in ref or "xxx" == ref:        # processing went wrong on some samples - unk
                 continue
             if ref == other_ref:
-                comparisons.append((ter_score - ter_score_other, ter_score, ter_score_other, hypo, other_hypo, ref))
+                if transcript != other_transcript:
+                    print("SOMETHING WENT VERY WRONG HERE")
+                comparisons.append((ter_score - ter_score_other, ter_score, ter_score_other, hypo, other_hypo, ref, transcript, asr_hypo))
     comparisons.sort(key=lambda x: x[0], reverse=True)
     markdown_string = ""
-    for ter_difference, first_score, second_score, first_hypo, second_hypo, ref_string in comparisons[:15]:
+    for ter_difference, first_score, second_score, first_hypo, second_hypo, ref_string, transcript, asr_hypo in comparisons[:15]:
         string = f"_TER Difference_: {ter_difference}\n_TER {model1}_: {first_score}\n_TER {model2}_: {second_score}\n" + \
-            f"*Reference*:\n{ref_string}\n*{model1} hypo*: {first_hypo}\n*{model2} hypo*: {second_hypo}"
+            f"*Transcript*:\n{transcript}\n*ASR Output*:\n{asr_hypo}\n*Reference*:\n{ref_string}\n" + \
+        f"*{model1} hypo*: {first_hypo}\n*{model2} hypo*: {second_hypo}"
         markdown_string += string
         markdown_string += "\n" + "---" * 15 + "\n"
     return markdown_string
@@ -114,6 +127,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("log_file_one", help="name of fairseq-generate log file")
     parser.add_argument("log_file_two", help="name of fairseq-generate log file")
+    parser.add_argument("ast_data_set", help="tsv file of dataset")
+    parser.add_argument("asr_output", help="name of fairseq-generate log file for asr model")
     parser.add_argument("model_one_name", help="specify name of first model")
     parser.add_argument("model_two_name", help="specify name of second model")
     args = parser.parse_args()
@@ -121,13 +136,17 @@ if __name__ == "__main__":
     fairseq_file_for_comparison = args.log_file_two
     result_filename = f"ter_comparison_{fairseq_file.split('.txt')[0]}_{fairseq_file_for_comparison.split('.txt')[0]}"
     references_list, hypotheses_list = get_reference_and_hypothesis_strings_from_datafile(fairseq_file)
-    ter_score_examples = calculate_ter_score_for_each_sentence_in_data(hypotheses_list, references_list)
+    asr_ref, asr_hypos = get_reference_and_hypothesis_strings_from_datafile(args.asr_output)
+    ter_score_examples = calculate_ter_score_for_each_sentence_in_data(hypotheses_list, references_list, args.ast_data_set, asr_ref, asr_hypos)
     comparison_references_list, comparison_hypotheses_list = get_reference_and_hypothesis_strings_from_datafile(
         fairseq_file_for_comparison
     )
     comparison_ter_score_examples = calculate_ter_score_for_each_sentence_in_data(
         comparison_hypotheses_list,
-        comparison_references_list
+        comparison_references_list,
+        args.ast_data_set,
+        asr_ref,
+        asr_hypos
     )
     result_string = compare_ter_scores(
         ter_score_examples,
