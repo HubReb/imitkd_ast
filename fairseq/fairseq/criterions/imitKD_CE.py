@@ -194,8 +194,8 @@ class ImitKD(FairseqCriterion):
         """
         with torch.no_grad():
             student = student.eval()
-            student_generator = SequenceGenerator([student], self.dict, beam_size=1)
-            student_generator.cuda()
+            # student_generator = SequenceGenerator([student], self.dict, beam_size=1)
+            # student_generator.cuda()
             targets = sample["net_input"]["prev_output_tokens"].data.tolist()
             max_length = max([len(i) for i in targets])  # let's avoid blowing up the GPU RAM, shall we?
             student_generator = SequenceGenerator([student], self.dict, beam_size=1, max_len=max_length)

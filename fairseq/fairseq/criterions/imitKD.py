@@ -130,9 +130,6 @@ class ImitKD(FairseqCriterion):
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
         self.beta = beta
-        self.sp_model = spm.SentencePieceProcessor()
-        self.sp_model.Load(sp_model)
-        self.sp_model.requires_grad = False
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
