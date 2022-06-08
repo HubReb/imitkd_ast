@@ -18,8 +18,8 @@ from fairseq.dataclass import FairseqDataclass
 from fairseq.checkpoint_utils import load_model_ensemble
 from fairseq.data import Dictionary
 from fairseq.sequence_generator import SequenceGenerator
-from fairseq.scoring import bleu
 from fairseq.criterions.helper_functions import valid_loss, collate_tokens
+import numpy as np
 
 
 @dataclass
@@ -73,15 +73,94 @@ def imit_kd_loss(
         expert,
         source_lengths,
         ignore_index,
+        booleans,
+        model_dict,
+        counter,
+        source_text,
+        source_len
 ):
     sample_expert = copy.deepcopy(generated_dataset)
     sample_expert["net_input"]["src_tokens"] = transcriptions.cuda()
     sample_expert["net_input"]["src_lengths"] = source_lengths
     with torch.no_grad():
         expert_logits = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=False)
-        pad_mask = expert_logits.eq(ignore_index)
+        preds = expert_logits.argmax(-1)
+        """
+        for i in preds:
+            expert_output = model_dict.string(
+                utils.strip_pad(i, ignore_index),
+                bpe_symbol='fastBPE',
+                escape_unk=True,
+                include_eos=True
+            )
+            print(expert_output)
+        sample_expert["net_input"]["src_tokens"] = source_text.cuda()
+        sample_expert["net_input"]["src_lengths"] = source_len
+        expert_logits_original = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=False)
+        preds = expert_logits.argmax(-1)
+        for i in preds:
+            expert_output = model_dict.string(
+                utils.strip_pad(i, ignore_index),
+                bpe_symbol='fastBPE',
+                escape_unk=True,
+                include_eos=True
+            )
+            print(expert_output)
+        """
+        target = sample_expert["net_input"]["prev_output_tokens"]
+        target = target.unsqueeze(-1)
+        pad_mask = target.eq(ignore_index)
         expert_logits.masked_fill_(pad_mask, 0.0)
+        """
+        sample_expert["net_input"]["src_tokens"] = source_text.cuda()
+        sample_expert["net_input"]["src_lengths"] = source_len
+        expert_logits_original = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=False)
+        expert_logits_original.masked_fill_(pad_mask, 0.0)
+        """
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
+    #t_s = "transcript\toriginal source text\ttarget\tmax prob list\tmax prob list original data\tcounter\n"
+    """
+    t_s = ""
+    numpy_array = []
+    numpy_array_orig = []
+    for i, boolean in enumerate(booleans):
+        if not boolean:
+            transcript = model_dict.string(
+                utils.strip_pad(transcriptions[i], ignore_index),
+                bpe_symbol='fastBPE',
+                escape_unk=True,
+                include_eos=False
+            )
+            original_source = model_dict.string(
+                utils.strip_pad(sample_expert["net_input"]["src_tokens"][i], ignore_index),
+                bpe_symbol='fastBPE',
+                escape_unk=True,
+                include_eos=False
+            )
+            target = model_dict.string(
+                utils.strip_pad(sample_expert["target"][i], ignore_index),
+                bpe_symbol=None,
+                escape_unk=True,
+                include_eos=True
+            )
+            while len(target) < expert_logits[i].shape[0]:
+                target += " pad"
+            probs_expert = expert_logits[i]
+            probs_expert = probs_expert.cpu().detach().numpy()
+            max_prob_list = [str(np.max(l)) for l in probs_expert]
+            numpy_array.append(probs_expert)
+            probs_expert_orig = expert_logits_original[i]
+            probs_expert_orig = probs_expert_orig.cpu().detach().numpy()
+            max_prob_list_orig = [str(np.max(l)) for l in probs_expert_orig]
+            numpy_array_orig.append(probs_expert_orig)
+            t_s += f"{transcript}\t{original_source}\t{target}\t{', '.join(max_prob_list)}\t{', '.join(max_prob_list_orig)}\t{counter}\n"
+    numpy_array = np.stack(numpy_array)
+    numpy_array_orig = np.stack(numpy_array_orig)
+    np.save(f"expert_probs_covost/{counter}_covost_original_from_transcripts.npy", numpy_array)
+    np.save(f"expert_probs_covost/{counter}_covost_original.npy", numpy_array)
+    with open(f"expert_probs_covost/transcripts_to_translation.txt", "a") as f:
+        f.write(t_s)
+    """
     return -torch.sum(expert_logits * lprobs)
 
 
@@ -106,6 +185,7 @@ class ImitKD(FairseqCriterion):
         super().__init__(task)
         self.ignore_prefix_size = ignore_prefix_size
         self.report_accuracy = report_accuracy
+        self.counter = 0
         self.expert, _ = load_model_ensemble([expert], arg_overrides={"data": path})
         self.expert = self.expert[-1]
         self.expert = self.expert.eval()
@@ -143,7 +223,8 @@ class ImitKD(FairseqCriterion):
             original_sample = copy.deepcopy(sample)
             original_sample["net_input"].pop("src_text", None)
             original_net_output = model(**original_sample["net_input"])
-            sample, asr_transcriptions, source_lengths = self.generate_imit_batch(model, sample)
+            source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
+            sample, asr_transcriptions, source_lengths, replaced_booleans = self.generate_imit_batch(model, sample)
             sample_s = copy.deepcopy(sample)
             sample_s["net_input"].pop("src_text", None)
             net_output = model(**sample_s["net_input"])
@@ -152,6 +233,9 @@ class ImitKD(FairseqCriterion):
                 net_output,
                 sample,
                 asr_transcriptions,
+                source_lengths,
+                replaced_booleans,
+                source_text,
                 source_lengths,
                 reduce=reduce,
                 valid=valid
@@ -169,6 +253,7 @@ class ImitKD(FairseqCriterion):
             n_correct, total = self.compute_accuracy(model, original_net_output, original_sample)
             logging_output["n_correct"] = utils.item(n_correct.data)
             logging_output["total"] = utils.item(total.data)
+        self.counter += 1
         return loss, sample_size, logging_output
 
     def get_lprobs_and_target(self, model, net_output, sample):
@@ -194,7 +279,7 @@ class ImitKD(FairseqCriterion):
         total = torch.sum(mask)
         return n_correct, total
 
-    def generate_imit_batch(self, student: Callable, sample: Dict) -> Tuple[Dict, torch.IntTensor, List[int]]:
+    def generate_imit_batch(self, student: Callable, sample: Dict) -> Tuple[Dict, torch.IntTensor, List[int], List[bool]]:
         """
         Use student model to generate hypothesis if probability function beta yields 1.
 
@@ -214,6 +299,7 @@ class ImitKD(FairseqCriterion):
             transcription_hypos = asr_generator._generate(sample)
             transcriptions = []
             lengths = []
+            replaced = []
             for i, h in enumerate(transcription_hypos):
                 transcriptions.append(h[0]["tokens"])
                 lengths.append(len(h[0]["tokens"]))
@@ -234,8 +320,10 @@ class ImitKD(FairseqCriterion):
                     else:
                         hypo = h[0]["tokens"].tolist()
                         prev_output_tokens[i] = torch.tensor([hypo[-1]] + hypo[1:-1])
+                    replaced.append(True)
                 else:
                     prev_output_tokens[i] = torch.tensor(prev_output_tokens[i])
+                    replaced.append(False)
             sample["net_input"]["prev_output_tokens"] = collate_tokens(
                 prev_output_tokens,
                 self.dict.pad(),
@@ -244,14 +332,14 @@ class ImitKD(FairseqCriterion):
                 move_eos_to_beginning=False
             ).cuda()
         student.train()
-        return sample, transcriptions, lengths
+        return sample, transcriptions, lengths, replaced
 
-    def compute_loss(self, model, net_output, sample, transcriptions=None, source_lengths=None, reduce=True, valid=False):
+    def compute_loss(self, model, net_output, sample, transcriptions=None, source_lengths=None, booleans=None, source_text=None, source_len=None, reduce=True, valid=False):
         if valid:
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.padding_idx, reduce=reduce)
         else:
-            loss = imit_kd_loss(sample, transcriptions, model, self.expert, source_lengths, self.pad_idx)
+            loss = imit_kd_loss(sample, transcriptions, model, self.expert, source_lengths, self.pad_idx, booleans, self.dict, self.counter, source_text, source_len)
         return loss
 
     @classmethod

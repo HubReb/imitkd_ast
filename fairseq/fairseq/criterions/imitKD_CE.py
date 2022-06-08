@@ -84,7 +84,8 @@ def imit_kd_loss(
     with torch.no_grad():
         expert_out = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=False)
         # expert_preds = expert_out.argmax(-1)
-        pad_mask = sample_expert["net_input"]["prev_output_tokens"].eq(model_dict.pad())
+        t = sample_expert["net_input"]["prev_output_tokens"].unsqueeze(-1)
+        pad_mask = t.eq(model_dict.pad())
         expert_out.masked_fill_(pad_mask, 0.0)
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
     # pad_mask = lprobs.eq(model_dict.pad())
