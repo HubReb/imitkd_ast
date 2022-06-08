@@ -6,6 +6,7 @@
 import math
 from dataclasses import dataclass, field
 import copy
+from typing import List, Tuple, Dict, Callable
 
 import fastBPE
 
@@ -18,6 +19,7 @@ from fairseq.dataclass import FairseqDataclass
 from fairseq.checkpoint_utils import load_model_ensemble
 from fairseq.data import Dictionary
 from fairseq.sequence_generator import SequenceGenerator
+from fairseq.criterions.helper_functions import valid_loss, collate_tokens
 
 
 @dataclass
@@ -58,36 +60,10 @@ class ImitKDTConfig(FairseqDataclass):
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
         metadata={"help": "expert's bpe codes"},
     )
-    bpe_codes_model: str = field(
-        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
-        metadata={"help": "models's bpe codes"},
-    )
     model_vocab_src: str = field(
         default="/scratch/hubert/knn_ast_kd_nmt/fairseq/examples/translation/data-bin/MUST_source/dict.en.txt",
         metadata={"help": "vocab file for ast model input"},
     )
-    model_vocab_tgt: str = field(
-        default="/scratch/hubert/knn_ast_kd_nmt/fairseq/examples/translation/data-bin/MUST_source/dict.de.txt",
-        metadata={"help": "vocab file for ast model output"},
-    )
-    data_mix_rate: int = field(
-        default=1,
-        metadata={"help": "number of step to run before updating the model's parameters"},
-    )
-
-
-def valid_loss(lprobs, target, ignore_index=None, reduce=True):
-    if target.dim() == lprobs.dim() - 1:
-        target = target.unsqueeze(-1)
-    nll_loss = -lprobs.gather(dim=-1, index=target)
-    if ignore_index is not None:
-        pad_mask = target.eq(ignore_index)
-        nll_loss.masked_fill_(pad_mask, 0.0)
-    else:
-        nll_loss = nll_loss.squeeze(-1)
-    if reduce:
-        nll_loss = nll_loss.sum()
-    return nll_loss
 
 
 def imit_kd_loss(
@@ -108,7 +84,7 @@ def imit_kd_loss(
         expert_preds = expert_preds.unsqueeze(-1)
     imit_kd_loss_for_sample = -lprobs.gather(dim=-1, index=expert_preds)
     if ignore_index is not None:
-        pad_mask = expert_preds.eq(ignore_index)
+        pad_mask = sample_expert["net_input"]["prev_output_tokens"].eq(ignore_index)
         imit_kd_loss_for_sample.masked_fill_(pad_mask, 0.0)
     imit_kd_loss_for_sample = imit_kd_loss_for_sample.sum()
     return imit_kd_loss_for_sample
@@ -127,10 +103,7 @@ class ImitKD(FairseqCriterion):
             path,
             beta,
             bpe_codes,
-            bpe_codes_model,
-            data_mix_rate,
             model_vocab_src,
-            model_vocab_tgt,
             warmup,
             ignore_prefix_size=0,
             report_accuracy=False,
@@ -138,7 +111,6 @@ class ImitKD(FairseqCriterion):
         super().__init__(task)
         self.ignore_prefix_size = ignore_prefix_size
         self.report_accuracy = report_accuracy
-        self.data_mix_rate = data_mix_rate
         self.expert, _ = load_model_ensemble([expert], arg_overrides={"data": path})
         self.expert = self.expert[-1]
         self.expert = self.expert.eval()
@@ -152,7 +124,6 @@ class ImitKD(FairseqCriterion):
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
         self.beta = beta
-        self.sp_model = fastBPE.fastBPE(bpe_codes_model, model_vocab_tgt)
         self.warmup = warmup
 
     def forward(self, model, sample, reduce=True, valid=False):
@@ -206,7 +177,14 @@ class ImitKD(FairseqCriterion):
             )
         return loss
 
-    def generate_imit_batch(self, student, sample):
+    def generate_imit_batch(self, student: Callable, sample: Dict) -> Dict:
+        """
+        Use student model to generate hypothesis if probability function beta yields 1.
+
+        :param student: model to train
+        :param sample: dataset batch
+        :return: dataset batch with prev_output_tokens == student hypothesis if beta_i = 1
+        """
         with torch.no_grad():
             student = student.eval()
             targets = sample["net_input"]["prev_output_tokens"].data.tolist()
@@ -281,24 +259,3 @@ class ImitKD(FairseqCriterion):
         to True will improves distributed training speed.
         """
         return True
-
-
-def collate_tokens(values, pad_idx, eos, left_pad, move_eos_to_beginning):
-    size = max(v.size(0) for v in values)
-    res = values[0].new(len(values), size).fill_(pad_idx)
-
-    def copy_tensor(src, dst):
-        assert dst.numel() == src.numel()
-        if move_eos_to_beginning:
-            assert src[-1] == eos
-            dst[0] = eos
-            dst[1:] = src[:-1]
-        else:
-            dst.copy_(src)
-
-    for i, v in enumerate(values):
-        if left_pad:
-            copy_tensor(v, res[i][size - len(v):])
-        else:
-            copy_tensor(v, res[i][:len(v)])
-    return res

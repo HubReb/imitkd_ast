@@ -60,7 +60,10 @@ class ImitKDConfigCheckedPredictionsWithGoldReferencesCopy(FairseqDataclass):
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
         metadata={"help": "expert's bpe codes"},
     )
-
+    label_smoothing: float = field(
+        default=0.0,
+        metadata={"help": "epsilon for label smoothing, 0 means no label smoothing"},
+    )
 
 
 def imit_kd_loss(
@@ -70,7 +73,8 @@ def imit_kd_loss(
         source_text,
         model_dict,
         source_lengths,
-        ignore_index
+        ignore_index,
+        epsilon
 ):
     sample_expert = {
         "id": generated_dataset["id"],
@@ -85,7 +89,7 @@ def imit_kd_loss(
         "nsentences": generated_dataset["nsentences"],
     }
     with torch.no_grad():
-        expert_logits = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=True).detach()
+        expert_logits = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=True)
         preds = expert_logits.argmax(-1)
         preds = preds.to(torch.int64).cuda()
     generated_dataset["net_input"].pop("src_text", None)
@@ -95,10 +99,19 @@ def imit_kd_loss(
     # if preds.shape[1] > lprobs.shape[1]:
         # preds = preds[:, :lprobs.shape[1], :]
     imit_kd_loss_for_sample = -lprobs.gather(dim=-1, index=preds)
+    smooth_loss = -lprobs.sum(dim=-1, keepdim=True)
     if ignore_index is not None:
-        pad_mask = preds.eq(ignore_index)
+        target = sample_expert["target"]
+        target = target.unsqueeze(-1)
+        pad_mask = target.eq(ignore_index)
+        expert_logits.masked_fill_(pad_mask, 0.0)
         imit_kd_loss_for_sample.masked_fill_(pad_mask, 0.0)
+        smooth_loss.masked_fill_(pad_mask, 0.0)
+        smooth_loss = smooth_loss.squeeze(-1)
     imit_kd_loss_for_sample = imit_kd_loss_for_sample.sum()
+    smooth_loss = smooth_loss.sum()
+    eps_i = epsilon / (lprobs.size(-1) - 1)
+    loss = (1.0 - epsilon - eps_i) * imit_kd_loss_for_sample + eps_i * smooth_loss
     return imit_kd_loss_for_sample
 
 
@@ -115,6 +128,7 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
             path,
             beta,
             bpe_codes,
+            label_smoothing,
             ignore_prefix_size=0,
             report_accuracy=False,
     ):
@@ -133,6 +147,8 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
         self.beta = beta
+        self.eps = label_smoothing
+
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
@@ -188,7 +204,8 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
                 source_text,
                 self.dict,
                 source_lengths,
-                self.padding_idx
+                self.padding_idx,
+                self.eps
             )
         return loss
 
