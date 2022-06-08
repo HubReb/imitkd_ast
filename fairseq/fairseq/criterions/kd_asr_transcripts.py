@@ -104,7 +104,9 @@ def kl_loss(
     sample_expert["net_input"]["src_lengths"] = source_lengths
     with torch.no_grad():
         expert_logits = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=False)
-        pad_mask = expert_logits.eq(ignore_index)
+        target = sample_expert["target"]
+        target = target.unsqueeze(-1)
+        pad_mask = target.eq(ignore_index)
         expert_logits.masked_fill_(pad_mask, 0.0)
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
     return -torch.sum(expert_logits * lprobs)
