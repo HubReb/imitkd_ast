@@ -3,14 +3,14 @@
 ## general information
 
 Implementation of [Imitation-based Knowledge Distillation](https://github.com/asappresearch/imitkd) from the paper ["Autoregressive Knowledge Distillation through Imitation Learning"](https://arxiv.org/abs/2009.07253) for Automatic Speech Translation (AST).
-Instead of an AST expert, The expert model is a trained Neural Machine Translation model.
+Instead of an AST expert, The expert model is a trained Neural Machine Translation (NMT) model.
 
 The implementation is entirely based the [fairseq framework](https://github.com/facebookresearch/fairseq), specifically on the [speech-to-text module](https://github.com/facebookresearch/fairseq/tree/main/examples/speech_to_text).
 For usage of the fairseq framework please see the (fairseq documentation)[https://fairseq.readthedocs.io/en/latest/].
 
 
 In order for ImitKD to work, several changes were made to the fairseq framework:
-* training loop was changed for $$\beta$$ calculation
+* training loop was changed
 * several files were added to the criterions
     * [imitKD.py](fairseq/fairseq/criterions/imitKD.py) (ImitKD-optimal)
     * [imitKD_CE.py](fairseq/fairseq/criterions/imitKD_CE.py) (ImitKD-full)
