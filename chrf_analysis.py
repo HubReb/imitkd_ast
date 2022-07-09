@@ -40,15 +40,17 @@ def calculate_chrf_score_for_each_sentence_in_data(hypotheses: List[str], refere
         asr_refs_to_hypos[r.strip()] = h
     chrfs = CHRF()
     for hypothesis, reference in zip(hypotheses, references):
-        asr_transcript = reference_to_transcript[reference]
         try:
+            asr_transcript = reference_to_transcript[reference]
             asr_hypo = asr_refs_to_hypos[asr_transcript.strip()]
+            score = chrfs.sentence_score(hypothesis, [reference]).score
+            chrf_scores[score] = (hypothesis, reference, asr_transcript, asr_hypo)
+            score = chrfs.sentence_score(hypothesis, [reference]).score
+            chrf_scores[score] = (hypothesis, reference, asr_transcript, asr_hypo)
         except KeyError:
+            continue
             print(asr_transcript)
         # chrf_score = calculate_chrf_score(hypothesis, reference)
-        asr_transcript = reference_to_transcript[reference]
-        score = chrfs.sentence_score(hypothesis, [reference]).score
-        chrf_scores[score] = (hypothesis, reference, asr_transcript, asr_hypo)
     ranked_chrf_score_list = sorted(
         [(chrf_score, hypothesis, reference, asr_transcript, asr_hypo) for chrf_score, (hypothesis, reference, asr_transcript, asr_hypo) in chrf_scores.items()],
         key=lambda x: x[0],
@@ -78,8 +80,8 @@ def compare_chrf_scores(
     for (chrf_score, hypo, ref, transcript, _) in chrf_score_list_one:
         for (chrf_score_other, other_hypo, other_ref, other_transcript, asr_hypo) in chrf_score_list_two:
             # we need to remove those to get ANYTHING OTHER than TO REMOVE and PLEASE REMOVE as highest chrF samples
-            if "TO REMOVE" in ref or "PLEASE REMOVE" in ref:
-                continue
+            # if "TO REMOVE" in ref or "PLEASE REMOVE" in ref:
+                # continue
             if ref == other_ref:
                 comparisons.append((chrf_score - chrf_score_other, chrf_score, chrf_score_other, hypo, other_hypo, ref, transcript, asr_hypo))
     comparisons.sort(key=lambda x: x[0], reverse=True)
@@ -137,7 +139,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     fairseq_file = args.log_file_one
     fairseq_file_for_comparison = args.log_file_two
-    result_filename = f"chrF_comparison_{fairseq_file.split('.txt')[0]}_{fairseq_file_for_comparison.split('.txt')[0]}"
+    result_filename = f"unfiltered_chrF_comparison_{fairseq_file.split('.txt')[0]}_{fairseq_file_for_comparison.split('.txt')[0]}"
     references_list, hypotheses_list = get_reference_and_hypothesis_strings_from_datafile(fairseq_file)
     asr_ref, asr_hypos = get_reference_and_hypothesis_strings_from_datafile(args.asr_output)
     chrf_score_examples = calculate_chrf_score_for_each_sentence_in_data(hypotheses_list, references_list, args.ast_data_set, asr_ref, asr_hypos)
