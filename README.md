@@ -1,10 +1,12 @@
 # knn_ast_KD_nmt
 
-Implementation of Imitation-based Knowledge Distillation [1] from the paper "Autoregressive Knowledge Distillation through Imitation Learning" [2] for Automatic Speech Translation (AST).
+## general information
+
+Implementation of [Imitation-based Knowledge Distillation][https://github.com/asappresearch/imitkd] from the paper ["Autoregressive Knowledge Distillation through Imitation Learning"][https://arxiv.org/abs/2009.07253] for Automatic Speech Translation (AST).
 Instead of an AST expert, The expert model is a trained Neural Machine Translation model.
 
-The implementation is entirely based the fairseq framework [3], specifically on the speech-to-text module [4].
-For usage of the fairseq framework please see the fairseq documentation [5].
+The implementation is entirely based the [fairseq framework][https://github.com/facebookresearch/fairseq], specifically on the [speech-to-text module][https://github.com/facebookresearch/fairseq/tree/main/examples/speech_to_text].
+For usage of the fairseq framework please see the [fairseq documentation][https://fairseq.readthedocs.io/en/latest/].
 
 
 In order for ImitKD to work, several changes were made to the fairseq framework:
@@ -20,11 +22,11 @@ In order for ImitKD to work, several changes were made to the fairseq framework:
 
 
 The best way to run experiments with generated transcripts is to:
-    - use the ASR model to transcribe the speech data
-    - use the NMT expert model to translate those transcripts if you want to use generated target translations
-    - run `create_wmt19_generated_dataset.py` to create a new dataset of generated trancripts:
-        - `python create_wmt19_generated_dataset.py -o ${fairseq-generate log file of NMT expert's translations} -a ${fairseq-generate log file of ASR model's transcripts} -d ${AST dataset file}`
-    - use the new dataset just as the original datasets 
+    1. use the ASR model to transcribe the speech data
+    2. use the NMT expert model to translate those transcripts if you want to use generated target translations
+    3. run `create_wmt19_generated_dataset.py` to create a new dataset of generated trancripts:
+        ``python create_wmt19_generated_dataset.py -o ${fairseq-generate log file of NMT expert's translations} -a ${fairseq-generate log file of ASR model's transcripts} -d ${AST dataset file}``
+    4. use the new dataset just as the original datasets 
 
 
 
