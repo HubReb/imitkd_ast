@@ -59,10 +59,6 @@ class ImitKDConfigCheckedPredictionsWithGoldReferencesWeightedCEAdded(FairseqDat
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
         metadata={"help": "expert's bpe codes"},
     )
-    data_mix_rate: int = field(
-        default=1,
-        metadata={"help": "number of step to run before updating the model;s parameters"},
-    )
 
 
 def valid_loss(lprobs, target, ignore_index=None, reduce=True):
@@ -142,13 +138,11 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
             path,
             beta,
             bpe_codes,
-            data_mix_rate,
             ignore_prefix_size=0,
             report_accuracy=False,
     ):
         super().__init__(task)
         self.ignore_prefix_size = ignore_prefix_size
-        self.data_mix_rate = data_mix_rate
         self.report_accuracy = report_accuracy
         self.expert, _ = load_model_ensemble([expert], arg_overrides={"data": path})
         self.expert = self.expert[-1]
@@ -243,7 +237,7 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
                         targets[i] = torch.tensor([self.dict.eos()] + h[0]["tokens"].tolist())
                     else:
                         hypo = h[0]["tokens"].tolist()
-                        targets[i] = torch.tensor([hypo[-1]] + hypo[1:-1])
+                        targets[i] = torch.tensor([hypo[-1]] + hypo[0:-1])
                 else:
                     targets[i] = torch.tensor(targets[i])
             sample["net_input"]["prev_output_tokens"] = collate_tokens(

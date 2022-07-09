@@ -93,7 +93,7 @@ def imit_kd_loss(
         # preds = preds[:, :lprobs.shape[1], :]
     imit_kd_loss_for_sample = -lprobs.gather(dim=-1, index=preds)
     if ignore_index is not None:
-        pad_mask = sample_expert["net_input"]["prev_output_tokens"].unsqueeze(-1).eq(ignore_index)
+        pad_mask = sample_expert["target"].unsqueeze(-1).eq(ignore_index)
         imit_kd_loss_for_sample.masked_fill_(pad_mask, 0.0)
     imit_kd_loss_for_sample = imit_kd_loss_for_sample.sum()
     return imit_kd_loss_for_sample
@@ -212,7 +212,7 @@ class ImitKD(FairseqCriterion):
                         targets[i] = torch.tensor([self.dict.eos()] + h[0]["tokens"].tolist())
                     else:
                         hypo = h[0]["tokens"].tolist()
-                        targets[i] = torch.tensor([hypo[-1]] + hypo[1:-1])
+                        targets[i] = torch.tensor([hypo[-1]] + hypo[0:-1])
                 else:
                     targets[i] = torch.tensor(targets[i])
             sample["net_input"]["prev_output_tokens"] = collate_tokens(

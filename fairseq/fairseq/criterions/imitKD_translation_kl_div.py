@@ -55,26 +55,9 @@ class ImitKDTConfig(FairseqDataclass):
         metadata={"help": "directory with expert's dictionaries"},
     )
     bpe_codes: str = field(
-        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
+        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/wmt19.en-de.joined-dict.ensemble/bpecodes",
         metadata={"help": "expert's bpe codes"},
     )
-    bpe_codes_model: str = field(
-        default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
-        metadata={"help": "models's bpe codes"},
-    )
-    model_vocab_src: str = field(
-        default="/scratch/hubert/knn_ast_kd_nmt/fairseq/examples/translation/data-bin/MUST_source/dict.en.txt",
-        metadata={"help": "vocab file for ast model input"},
-    )
-    model_vocab_tgt: str = field(
-        default="/scratch/hubert/knn_ast_kd_nmt/fairseq/examples/translation/data-bin/MUST_source/dict.de.txt",
-        metadata={"help": "vocab file for ast model output"},
-    )
-    data_mix_rate: int = field(
-        default=1,
-        metadata={"help": "number of step to run before updating the model's parameters"},
-    )
-
 
 def valid_loss(lprobs, target, ignore_index=None, reduce=True):
     if target.dim() == lprobs.dim() - 1:
@@ -127,10 +110,6 @@ class ImitKD(FairseqCriterion):
             path,
             beta,
             bpe_codes,
-            bpe_codes_model,
-            data_mix_rate,
-            model_vocab_src,
-            model_vocab_tgt,
             warmup,
             ignore_prefix_size=0,
             report_accuracy=False,
@@ -138,13 +117,11 @@ class ImitKD(FairseqCriterion):
         super().__init__(task)
         self.ignore_prefix_size = ignore_prefix_size
         self.report_accuracy = report_accuracy
-        self.data_mix_rate = data_mix_rate
         self.expert, _ = load_model_ensemble([expert], arg_overrides={"data": path})
         self.expert = self.expert[-1]
         self.expert = self.expert.eval()
         self.expert_vocab_src = Dictionary.load(expert_vocab_src)
         self.expert_vocab_tgt = Dictionary.load(expert_vocab_tgt)
-        self.model_src_dict = Dictionary.load(model_vocab_src)
         self.expert.requires_grad = False
         self.dict = task.tgt_dict
         self.eos = self.dict.eos()
@@ -152,7 +129,6 @@ class ImitKD(FairseqCriterion):
         self.pad_idx = self.padding_idx
         self.sentence_avg = False
         self.beta = beta
-        self.sp_model = fastBPE.fastBPE(bpe_codes_model, model_vocab_tgt)
         self.warmup = warmup
 
     def forward(self, model, sample, reduce=True, valid=False):
@@ -224,7 +200,7 @@ class ImitKD(FairseqCriterion):
                         targets[i] = torch.tensor([self.dict.eos()] + h[0]["tokens"].tolist())
                     else:
                         hypo = h[0]["tokens"].tolist()
-                        targets[i] = torch.tensor([hypo[-1]] + hypo[1:-1])
+                        targets[i] = torch.tensor([hypo[-1]] + hypo[0:-1])
                 else:
                     targets[i] = torch.tensor(targets[i])
             # targets = [hypo[0]["tokens"] if samp_mask[i] else torch.tensor(targets[i], device=torch.device('cuda:0'))

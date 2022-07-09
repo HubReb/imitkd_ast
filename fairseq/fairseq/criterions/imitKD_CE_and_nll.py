@@ -87,8 +87,7 @@ def imit_kd_loss(
         bpe,
         ignore_index,
         source_lengths,
-        target,
-        lprobs_for_nll
+        target
 ):
     """
     encoded_prevs = []
@@ -119,9 +118,11 @@ def imit_kd_loss(
         pad_mask = expert_out.eq(model_dict.pad())
         expert_out.masked_fill_(pad_mask, 0.0)
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
-    if target.dim() == lprobs_for_nll.dim() - 1:
+    if target.dim() == lprobs.dim() - 1:
         target = target.unsqueeze(-1)
-    nll_loss = -lprobs_for_nll.gather(dim=-1, index=target)
+    if target.shape[1] > lprobs.shape[1]:
+        target = target[:, :lprobs.shape[1], :]
+    nll_loss = -lprobs.gather(dim=-1, index=target)
     if ignore_index is not None:
         pad_mask = target.eq(ignore_index)
         nll_loss.masked_fill_(pad_mask, 0.0)
@@ -210,12 +211,11 @@ class ImitKD(FairseqCriterion):
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             loss = valid_loss(lprobs, target, self.padding_idx, reduce=reduce)
         else:
+            _, target = self.get_lprobs_and_target(model, net_output, sample)
             source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
             sample_s = copy.deepcopy(sample)
             sample_s["net_input"].pop("src_text", None)
             generated_dataset = self.generate_imit_batch(model, sample_s)
-            net_output = model(**sample_s["net_input"])
-            lprobs, target = self.get_lprobs_and_target(model, net_output, sample_s)
             loss = imit_kd_loss(
                 generated_dataset,
                 model,
@@ -226,8 +226,7 @@ class ImitKD(FairseqCriterion):
                 self.bpe,
                 self.padding_idx,
                 source_lengths,
-                target,
-                lprobs
+                target
             )
         return loss
 
@@ -250,7 +249,7 @@ class ImitKD(FairseqCriterion):
                         targets[i] = torch.tensor([self.dict.eos()] + h[0]["tokens"].tolist())
                     else:
                         hypo = h[0]["tokens"].tolist()
-                        targets[i] = torch.tensor([hypo[-1]] + hypo[1:-1])
+                        targets[i] = torch.tensor([hypo[-1]] + hypo[0:-1])
                 else:
                     targets[i] = torch.tensor(targets[i])
             sample["net_input"]["prev_output_tokens"] = collate_tokens(

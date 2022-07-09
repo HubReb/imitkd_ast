@@ -246,7 +246,7 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
                         targets[i] = torch.tensor([self.dict.eos()] + hypo[0]["tokens"].tolist())
                     else:
                         hypo = hypo[0]["tokens"].tolist()
-                        targets[i] = torch.tensor([hypo[-1]] + hypo[1:-1])
+                        targets[i] = torch.tensor([hypo[-1]] + hypo[0:-1])
                 else:
                     targets[i] = torch.tensor(targets[i])
             sample["net_input"]["prev_output_tokens"] = collate_tokens(

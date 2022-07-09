@@ -243,7 +243,7 @@ class ImitKD_pipeline_asr_training(FairseqCriterion):
                         prev_output_tokens[i] = torch.tensor([self.dict.eos()] + h[0]["tokens"].tolist())
                     else:
                         hypo = h[0]["tokens"].tolist()
-                        prev_output_tokens[i] = torch.tensor([hypo[-1]] + hypo[1:-1])
+                        prev_output_tokens[i] = torch.tensor([hypo[-1]] + hypo[0:-1])
                     if transcriptions[i][-1] != self.dict.eos():
                         sample_prev_output[i] = torch.tensor([self.dict.eos()] + transcriptions[i].tolist())
                     else:

@@ -84,8 +84,9 @@ def imit_kd_loss(
     sample_expert["net_input"]["src_lengths"] = source_lengths
     with torch.no_grad():
         expert_logits = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=False)
-        preds = expert_logits.argmax(-1)
         """
+        preds = expert_logits.argmax(-1)
+
         for i in preds:
             expert_output = model_dict.string(
                 utils.strip_pad(i, ignore_index),
@@ -108,21 +109,25 @@ def imit_kd_loss(
             print(expert_output)
         """
         target = sample_expert["net_input"]["prev_output_tokens"]
-        target = target.unsqueeze(-1)
+        if target.dim() == expert_logits.dim() - 1:
+            target = target.unsqueeze(-1)
         pad_mask = target.eq(ignore_index)
         expert_logits.masked_fill_(pad_mask, 0.0)
-        """
+
         sample_expert["net_input"]["src_tokens"] = source_text.cuda()
         sample_expert["net_input"]["src_lengths"] = source_len
         expert_logits_original = expert.get_normalized_probs(expert(**sample_expert["net_input"]), log_probs=False)
         expert_logits_original.masked_fill_(pad_mask, 0.0)
-        """
+
     lprobs = model.get_normalized_probs(model(**generated_dataset["net_input"]), log_probs=True)
-    #t_s = "transcript\toriginal source text\ttarget\tmax prob list\tmax prob list original data\tcounter\n"
-    """
-    t_s = ""
+    wers = 'WER\n'
+
+    t_s = "transcript\toriginal source text\ttarget\thypo\tWER\tmax prob list\tmax prob list original data\tcounter\tin data counter\n"
+
+    # t_s = ""
     numpy_array = []
     numpy_array_orig = []
+    in_counter = 0
     for i, boolean in enumerate(booleans):
         if not boolean:
             transcript = model_dict.string(
@@ -132,19 +137,35 @@ def imit_kd_loss(
                 include_eos=False
             )
             original_source = model_dict.string(
-                utils.strip_pad(sample_expert["net_input"]["src_tokens"][i], ignore_index),
+                utils.strip_pad(source_text[i], ignore_index),
                 bpe_symbol='fastBPE',
                 escape_unk=True,
                 include_eos=False
             )
+            #if transcript == original_source:
+             #   continue
+            wer_rate = wer(transcript, original_source)
+            #if wer_rate < 10:
+             #   continue
+            # print(wer_rate, transcript, original_source)
+
             target = model_dict.string(
                 utils.strip_pad(sample_expert["target"][i], ignore_index),
                 bpe_symbol=None,
                 escape_unk=True,
                 include_eos=True
             )
+            hypo = model_dict.string(
+                utils.strip_pad(sample_expert["net_input"]["prev_output_tokens"][i], ignore_index),
+                bpe_symbol=None,
+                escape_unk=True,
+                include_eos=True
+            )
             while len(target) < expert_logits[i].shape[0]:
                 target += " pad"
+
+            wers += f"{wer_rate}\n"
+
             probs_expert = expert_logits[i]
             probs_expert = probs_expert.cpu().detach().numpy()
             max_prob_list = [str(np.max(l)) for l in probs_expert]
@@ -153,14 +174,20 @@ def imit_kd_loss(
             probs_expert_orig = probs_expert_orig.cpu().detach().numpy()
             max_prob_list_orig = [str(np.max(l)) for l in probs_expert_orig]
             numpy_array_orig.append(probs_expert_orig)
-            t_s += f"{transcript}\t{original_source}\t{target}\t{', '.join(max_prob_list)}\t{', '.join(max_prob_list_orig)}\t{counter}\n"
-    numpy_array = np.stack(numpy_array)
-    numpy_array_orig = np.stack(numpy_array_orig)
-    np.save(f"expert_probs_covost/{counter}_covost_original_from_transcripts.npy", numpy_array)
-    np.save(f"expert_probs_covost/{counter}_covost_original.npy", numpy_array)
-    with open(f"expert_probs_covost/transcripts_to_translation.txt", "a") as f:
-        f.write(t_s)
-    """
+            t_s += f"{transcript}\t{original_source}\t{target}\t{hypo}\t{wer_rate}\t{', '.join(max_prob_list)}\t{', '.join(max_prob_list_orig)}\t{counter}\t{in_counter}\n"
+
+            in_counter += 1
+
+    if numpy_array_orig:
+        numpy_array = np.stack(numpy_array)
+        numpy_array_orig = np.stack(numpy_array_orig)
+        np.save(f"expert_probs_kd_on_translations_few/{counter}_covost_from_transcripts.npy", numpy_array)
+        np.save(f"expert_probs_kd_on_translations_few/{counter}_covost_original.npy", numpy_array_orig)
+        with open(f"expert_probs_kd_on_translations_few/transcripts_to_translation.txt", "a") as f:
+            f.write(t_s)
+
+    with open(f"covost_wers_small.csv", "a") as f:
+        f.write(wers)
     return -torch.sum(expert_logits * lprobs)
 
 
@@ -300,6 +327,7 @@ class ImitKD(FairseqCriterion):
             transcriptions = []
             lengths = []
             replaced = []
+            self.beta = 1
             for i, h in enumerate(transcription_hypos):
                 transcriptions.append(h[0]["tokens"])
                 lengths.append(len(h[0]["tokens"]))
@@ -311,6 +339,8 @@ class ImitKD(FairseqCriterion):
                 move_eos_to_beginning=False
             ).cuda()
             sample["net_input"].pop("src_text", None)
+
+
             dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
             samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
             for i, h in enumerate(student_hypos):
@@ -319,7 +349,7 @@ class ImitKD(FairseqCriterion):
                         prev_output_tokens[i] = torch.tensor([self.dict.eos()] + h[0]["tokens"].tolist())
                     else:
                         hypo = h[0]["tokens"].tolist()
-                        prev_output_tokens[i] = torch.tensor([hypo[-1]] + hypo[1:-1])
+                        prev_output_tokens[i] = torch.tensor([hypo[-1]] + hypo[0:-1])
                     replaced.append(True)
                 else:
                     prev_output_tokens[i] = torch.tensor(prev_output_tokens[i])
@@ -331,6 +361,7 @@ class ImitKD(FairseqCriterion):
                 left_pad=False,
                 move_eos_to_beginning=False
             ).cuda()
+
         student.train()
         return sample, transcriptions, lengths, replaced
 
@@ -413,3 +444,77 @@ class ImitKD(FairseqCriterion):
             move_eos_to_beginning=eos_at_beginning
         )
         return source_text, src_lengths
+
+
+# everything below this point is taken from https://github.com/zszyellow/WER-in-python/blob/master/wer.py
+def editDistance(r, h):
+    '''
+    This function is to calculate the edit distance of reference sentence and the hypothesis sentence.
+    Main algorithm used is dynamic programming.
+    Attributes:
+        r -> the list of words produced by splitting reference sentence.
+        h -> the list of words produced by splitting hypothesis sentence.
+    '''
+    d = np.zeros((len(r) + 1) * (len(h) + 1), dtype=np.uint8).reshape((len(r) + 1, len(h) + 1))
+    for i in range(len(r) + 1):
+        d[i][0] = i
+    for j in range(len(h) + 1):
+        d[0][j] = j
+    for i in range(1, len(r) + 1):
+        for j in range(1, len(h) + 1):
+            if r[i - 1] == h[j - 1]:
+                d[i][j] = d[i - 1][j - 1]
+            else:
+                substitute = d[i - 1][j - 1] + 1
+                insert = d[i][j - 1] + 1
+                delete = d[i - 1][j] + 1
+                d[i][j] = min(substitute, insert, delete)
+    return d
+
+
+def getStepList(r, h, d):
+    """
+    This function is to get the list of steps in the process of dynamic programming.
+    Attributes:
+        r -> the list of words produced by splitting reference sentence.
+        h -> the list of words produced by splitting hypothesis sentence.
+        d -> the matrix built when calulating the editting distance of h and r.
+    """
+    x = len(r)
+    y = len(h)
+    list = []
+    while True:
+        if x == 0 and y == 0:
+            break
+        elif x >= 1 and y >= 1 and d[x][y] == d[x - 1][y - 1] and r[x - 1] == h[y - 1]:
+            list.append("e")
+            x = x - 1
+            y = y - 1
+        elif y >= 1 and d[x][y] == d[x][y - 1] + 1:
+            list.append("i")
+            x = x
+            y = y - 1
+        elif x >= 1 and y >= 1 and d[x][y] == d[x - 1][y - 1] + 1:
+            list.append("s")
+            x = x - 1
+            y = y - 1
+        else:
+            list.append("d")
+            x = x - 1
+            y = y
+    return list[::-1]
+
+
+def wer(r, h):
+    """
+    This is a function that calculate the word error rate in ASR.
+    You can use it like this: wer("what is it".split(), "what is".split())
+    """
+    # build the matrix
+    d = editDistance(r, h)
+
+    # find out the manipulation steps
+    list = getStepList(r, h, d)
+
+    # print the result in aligned way
+    return float(d[len(r)][len(h)]) / len(r) * 100

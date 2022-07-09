@@ -95,7 +95,7 @@ def imit_kd_loss(
 
 
 @register_criterion(
-    "imit_kd_CE_generated_dataset", dataclass=ImitKDConfig
+        "imit_kd_CE_generated_dataset", dataclass=ImitKDConfig
 )
 class ImitKDGenerated(FairseqCriterion):
     def __init__(
@@ -208,7 +208,7 @@ class ImitKDGenerated(FairseqCriterion):
                     targets[i] = torch.tensor([self.dict.eos()] + h[0]["tokens"].tolist())
                 else:
                     hypo = h[0]["tokens"].tolist()
-                    targets[i] = torch.tensor([hypo[-1]] + hypo[1:-1])
+                    targets[i] = torch.tensor([hypo[-1]] + hypo[0:-1])
             sample["net_input"]["prev_output_tokens"] = collate_tokens(
                 targets,
                 self.dict.pad(),
