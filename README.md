@@ -50,7 +50,9 @@ For COVOST2 and MUST-C:
 ## model training
 
 Model training is done as is specified in the fairseq framework.
-For instance,
+For instance:
+
+
 `fairseq-train ${COVOST_ROOT}/en --config-yaml config_st_en_de.yaml --train-subset train_processed --valid-subset dev_processed  --num-workers 8 --max-tokens 50000  --max-update 30000   --task speech_to_text --criterion imit_kd --report-accuracy --arch s2t_transformer_s \ 
 --optimizer adam --lr 0.002 --lr-scheduler inverse_sqrt --seed 1 --clip-norm 10.0 --expert ${PATH_TO_EXPERT_MODEL} --expert-vocab-tgt ${PATH_TO_EXPERT_MODEL_DICTIONARY}  --expert-vocab-src ${PATH_TO_EXPERT_MODEL_SRC_DICTIONARY} --path  ${PATH_TO_EXPERT_MODEL_DICTIONARY} \
  --save-dir ${ST_SAVE_DIR}  --bpe-codes ${PATH_TO_BPE} --warmup-updates 10000 --clip-norm 10.0 --seed 1 --update-freq 8  --patience 10 --load-pretrained-encoder-from ${ASR_MODEL} --encoder-freezing-updates 1000`
