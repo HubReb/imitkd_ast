@@ -1,5 +1,6 @@
 import argparse
 
+
 def read_file(filename):
     with open(filename) as f:
         data = f.read().split("\n")[:-1]
@@ -7,6 +8,7 @@ def read_file(filename):
 
 
 def get_references(data):
+    """get references in fairseq-generate log file"""
     references = []
     for line in data:
         if line.startswith("T-"):
@@ -15,6 +17,7 @@ def get_references(data):
 
 
 def get_output_hypothesis(data):
+    """get hypotheses in fairseq-generate log file"""
     output_hypos = []
     for line in data:
         if line.startswith("D-"):
@@ -22,9 +25,8 @@ def get_output_hypothesis(data):
     return output_hypos
 
 
-
-
 def extract_hypos_and_source(filenames):
+    """ write hypotheses and references to seperate files"""
     filename_list = read_file(filenames)
     for filename in filename_list:
         print(filename)
@@ -34,7 +36,7 @@ def extract_hypos_and_source(filenames):
         hypos = get_output_hypothesis(data)
         if "/" in filename:
             filename = filename.split("/")[-1]
-        hypo_file = "result_folder/" +filename.split(".txt")[0] + "_hypothesis.txt"
+        hypo_file = "result_folder/" + filename.split(".txt")[0] + "_hypothesis.txt"
         source_file = "result_folder/" + filename.split(".txt")[0] + "_sources.txt"
         with open(hypo_file, "w") as f:
             f.write("\n".join(hypos))
@@ -42,12 +44,8 @@ def extract_hypos_and_source(filenames):
             f.write("\n".join(references))
 
 
-
-
-
 parser = argparse.ArgumentParser()
 parser.add_argument("log_file_list", help="name of fairseq-generate log file")
 args = parser.parse_args()
 fairseq_file = args.log_file_list
 extract_hypos_and_source(fairseq_file)
-

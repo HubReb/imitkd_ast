@@ -1,5 +1,6 @@
 #! /usr/bin/env python3
 
+
 def read_file(filename):
     with open(filename) as f:
         data = f.read().split("\n")[:-1]
@@ -14,6 +15,7 @@ def combine_source_and_hypothesis_in_dictionary(source_data, hypothesis_data):
 
 
 def sort_data_streams(reference_list, args):
+    """ sort hypotheses to fit reference order in reference_list """
     if len(args) < 2:
         raise TypeError("At least two source/hypo dictionaries are required!")
     new_hypo_files = []
@@ -26,7 +28,10 @@ def sort_data_streams(reference_list, args):
 
 
 def write_data_to_file(filename, data):
-    with open(f"/home/rebekka/reordered_hypos/{filename.split('/')[-1].split('.txt')[0] + '_ordered.txt'}", "w") as f:
+    with open(
+        f"/home/rebekka/reordered_hypos/{filename.split('/')[-1].split('.txt')[0] + '_ordered.txt'}",
+        "w",
+    ) as f:
         assert isinstance(data, list)
         f.write("\n".join(data))
 
@@ -37,10 +42,12 @@ def check_if_folder_exits_or_create(foldername):
     if isdir(foldername):
         return
     import os
+
     os.makedirs(foldername)
 
 
 def run(source_filenames, translation_filenames):
+    """ reorder two lists of hypotheses to be in the same order """
     source_data = []
     for source_filename in source_filenames:
         assert "source" in source_filename
@@ -55,7 +62,9 @@ def run(source_filenames, translation_filenames):
     dictionary_list = []
     for index, data_stream in enumerate(original_data):
         assert "hypo" in translation_filenames[index]
-        dictionary_list.append(combine_source_and_hypothesis_in_dictionary(source_data[index], data_stream))
+        dictionary_list.append(
+            combine_source_and_hypothesis_in_dictionary(source_data[index], data_stream)
+        )
     new_hypo_data = sort_data_streams(source_data[0], dictionary_list)
     for index, data in enumerate(new_hypo_data):
         write_data_to_file(translation_filenames[index], data)
@@ -63,8 +72,17 @@ def run(source_filenames, translation_filenames):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="handle different orders of fairseq-generate outputs")
-    parser.add_argument('-s', '--source_references', nargs='+', help="files containing the reference sentences line by line", required=True)
-    parser.add_argument('-t', '--translations', nargs='+', required=True)
+
+    parser = argparse.ArgumentParser(
+        description="handle different orders of fairseq-generate outputs"
+    )
+    parser.add_argument(
+        "-s",
+        "--source_references",
+        nargs="+",
+        help="files containing the reference sentences line by line",
+        required=True,
+    )
+    parser.add_argument("-t", "--translations", nargs="+", required=True)
     args = parser.parse_args()
     run(args.source_references, args.translations)

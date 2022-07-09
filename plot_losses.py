@@ -8,7 +8,11 @@ def load_data_and_filter_logged_data(logging_file):
     """extract validation loss and validation steps from fairseq-train log file"""
     with open(logging_file) as f:
         data = f.read()
-    dev_loss_lines = [line for line in data.split("\n") if line.startswith("epoch") and "dev_processed" in line]
+    dev_loss_lines = [
+        line
+        for line in data.split("\n")
+        if line.startswith("epoch") and "dev_processed" in line
+    ]
     steps, losses = {}, []
     last_epoch = ""
     best_loss = 999
@@ -42,25 +46,31 @@ def draw_graph(steps, loss, asr_steps, asr_losses):
     assert steps == asr_steps
 
     # adapted from https://matplotlib.org/2.2.2/gallery/ticks_and_spines/tick_labels_from_values.html
-    def format_fn(tick_val, tick_pos):      # need to set second argument to pass to set_major_formatter
+    def format_fn(
+        tick_val, tick_pos
+    ):  # need to set second argument to pass to set_major_formatter
         if int(tick_val) in xs:
             return steps[int(tick_val)]
         else:
-            return ''
+            return ""
+
     ax.xaxis.set_major_formatter(format_fn)
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-    ax.plot(loss, label='ImitKD')
+    ax.plot(loss, label="ImitKD")
     ax.plot(asr_losses, label="ImitKDT")
     ax.grid()
     ax.set_xlabel("number of training steps")
     ax.set_ylabel("development loss")
-    #ax.set_title("Validation loss")
+    # ax.set_title("Validation loss")
     ax.legend()
     plt.show()
-    #plt.savefig("imit_losses.png")
+    # plt.savefig("imit_losses.png")
 
 
-training_steps, val_losses = load_data_and_filter_logged_data("europarl_asrimitkd_training_process.txt")
-asr_training_steps, asr_val_losses = load_data_and_filter_logged_data("europarl_imitkd_training_process.txt")
+training_steps, val_losses = load_data_and_filter_logged_data(
+    "europarl_asrimitkd_training_process.txt"
+)
+asr_training_steps, asr_val_losses = load_data_and_filter_logged_data(
+    "europarl_imitkd_training_process.txt"
+)
 draw_graph(training_steps, val_losses, asr_training_steps, asr_val_losses)
-
