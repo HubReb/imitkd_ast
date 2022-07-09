@@ -31,6 +31,7 @@ def get_tokenized_text(filename):
 def add_tokenized_text_to_target(filename, tokenized_text, result_filename, column_name="tgt_txt"):
     df = pd.read_csv(filename, sep="\t")
     if column_name == "tgt_txt":
+        print(len(df.tgt_text),  len(tokenized_text.split("\n")[:-1]))
         df.tgt_text = tokenized_text.split("\n")[:-1]
     elif column_name == "src_txt":
         df.src_text = tokenized_text.split("\n")[:-1]
@@ -48,7 +49,7 @@ def get_source_text_old_fashioned(filename, column_name="tgt_txt", column_number
     if column_name == "tgt_txt":
         index = 4
         if column_number != 6:
-            index = 5
+            index = 3
     elif column_name == "src_txt":
         index = -1
     else:
@@ -65,7 +66,7 @@ def add_tokenized_text_to_target_old_fashioned(filename, tokenized_text, result_
     if column_name == "tgt_txt":
         new_csv = [data[0]]
     elif column_name == "src_txt":
-        new_csv = [data[0]]
+        new_csv = [data[0]  + "\t" + "src_text"]
     else:
         raise ValueError(f"{column_name} is not supported")
     tokenized_text = tokenized_text.split("\n")[:-1]
@@ -116,8 +117,6 @@ def get_text_from_datasets():
     save_text_in_file("mustc_processed/dev_text.txt", target_text)
     target_text = get_column_text("mustc_csvs/tst-COMMON_st_with_source_text.tsv")
     save_text_in_file("mustc_processed/test_text.txt", target_text)
-    target_text = get_column_text("libri_csv/train_libri_pseudo_labeled.tsv", column_name="src_txt")
-    save_text_in_file("libri_processed/train_text.txt", target_text)
     target_text = get_source_text_old_fashioned("mustc_csvs/train_st_with_source_text_normal.tsv", column_name="src_txt")
     save_text_in_file("mustc_processed/train_text_en.txt", target_text)
     target_text = get_column_text("mustc_processed/dev_processed.tsv", column_name="src_txt")
@@ -129,26 +128,28 @@ def get_text_from_datasets():
 
 
 def create_processed_datasets():
+    
     gen_vocab(Path("covost_processed_text/train.tok.de"), Path("covost/en/spm_bpe8000_ast"), "bpe", 8000)
 
     tokenized_training_text = get_tokenized_text("covost_processed_text/train.tok.de")
     add_tokenized_text_to_target('covost/en/train_st_en_de_with_source_text.tsv', tokenized_training_text,
                                  'covost/en/train_processed.tsv')
-    tokenized_training_text = get_tokenized_text("covost_processed_text/train.tok.en")
-    add_tokenized_text_to_target("covost/en/train_processed.tsv", tokenized_training_text,
-                                 "covost/en/train_processed.tsv", column_name="src_txt")
+    tokenized_training_text = get_tokenized_text("covost_processed_text/train_asr.tok.en")
+    add_tokenized_text_to_target("covost/en/train_asr_en.tsv", tokenized_training_text,
+                                 "covost/en/train_asr_processed.tsv", column_name="tgt_txt")
     tokenized_dev_text = get_tokenized_text("covost_processed_text/dev.tok.de")
     add_tokenized_text_to_target('covost/en/dev_st_en_de_with_source_text.tsv', tokenized_dev_text,
                                  'covost/en/dev_processed.tsv')
-    tokenized_dev_text = get_tokenized_text("covost_processed_text/dev.tok.en")
-    add_tokenized_text_to_target('covost/en/dev_processed.tsv', tokenized_dev_text,
-                                 'covost/en/dev_processed.tsv', column_name="src_txt")
+    tokenized_dev_text = get_tokenized_text("covost_processed_text/dev_asr.tok.en")
+    add_tokenized_text_to_target('covost/en/dev_asr_en.tsv', tokenized_dev_text,
+                                 'covost/en/dev_asr_processed.tsv', column_name="tgt_txt")
     tokenized_test_text = get_tokenized_text('covost_processed_text/test.tok.de')
     add_tokenized_text_to_target('covost/en/test_st_en_de_with_source_text.tsv', tokenized_test_text,
                                  'covost/en/test_processed.tsv')
-    tokenized_test_text = get_tokenized_text('covost_processed_text/test.tok.en')
-    add_tokenized_text_to_target('covost/en/test_processed.tsv', tokenized_test_text,
-                                 'covost/en/test_processed.tsv', column_name="src_txt")
+    tokenized_test_text = get_tokenized_text('covost_processed_text/test_asr.tok.en')
+    add_tokenized_text_to_target('covost/en/test_asr_en.tsv', tokenized_test_text,
+                                 'covost/en/test_asr_processed.tsv', column_name="tgt_txt")
+   
     gen_vocab(Path("mustc_processed_text/train.tok.de"), Path("MUST/en-de/spm_bpe8000_ast"), "bpe", 8000)
     tokenized_training_text = get_tokenized_text("mustc_processed_text/train.tok.de")
     add_tokenized_text_to_target_old_fashioned_train("mustc_csvs/train_st_with_source_text.tsv", tokenized_training_text,
@@ -159,9 +160,16 @@ def create_processed_datasets():
     tokenized_test_text = get_tokenized_text("mustc_processed_text/test.tok.de")
     add_tokenized_text_to_target_old_fashioned("mustc_csvs/tst-COMMON_st_with_source_text.tsv", tokenized_test_text,
                                                "mustc_processed/tst-COMMON_processed.tsv")
-    tokenized_libri_text = get_tokenized_text('libri_processed_text/train.tok.de')
-    add_tokenized_text_to_target('libri_csv/train_libri_pseudo_labeled.tsv', tokenized_libri_text,
-                                 'train_libri_processed.tsv')
+    tokenized_training_text = get_tokenized_text("mustc_processed_text/train.tok.en")
+    add_tokenized_text_to_target_old_fashioned_train("mustc_csvs/train_asr.tsv", tokenized_training_text,
+                                                     "mustc_processed/train_asr_processed.tsv")
+    tokenized_dev_text = get_tokenized_text("mustc_processed_text/dev.tok.en")
+    add_tokenized_text_to_target_old_fashioned("mustc_csvs/dev_asr.tsv", tokenized_dev_text,
+                                               "mustc_processed/dev_asr_processed.tsv")
+    tokenized_test_text = get_tokenized_text("mustc_processed_text/test.tok.en")
+    add_tokenized_text_to_target_old_fashioned("mustc_csvs/tst-COMMON_asr.tsv", tokenized_test_text,
+                                               "mustc_processed/tst-COMMON_asr_processed.tsv")
+
     tokenized_training_text = get_tokenized_text("mustc_processed_text/train.tok.en")
     add_tokenized_text_to_target_old_fashioned("mustc_processed/train_processed.tsv", tokenized_training_text,
                                                "mustc_processed/train_processed.tsv", column_name="src_txt")
@@ -172,6 +180,18 @@ def create_processed_datasets():
     tokenized_test_text = get_tokenized_text("mustc_processed_text/test.tok.en")
     add_tokenized_text_to_target_old_fashioned("mustc_processed/tst-COMMON_processed.tsv", tokenized_test_text,
                                                "mustc_processed/tst-COMMON_processed.tsv", column_name="src_txt")
+    tokenized_training_text = get_tokenized_text("../../../v1.1/en/de/train/segments.tok.en")
+    add_tokenized_text_to_target_old_fashioned("../../../v1.1/train_st_en_de.tsv", tokenized_training_text,
+                                               "../../../v1.1/train_processed.tsv", column_name="src_txt")
+    tokenized_train_noisy_text = get_tokenized_text("../../../v1.1/en/de/train-noisy/segments.tok.en")
+    add_tokenized_text_to_target_old_fashioned("../../../v1.1/train-noisy_st_en_de.tsv", tokenized_train_noisy_text,
+                                               "../../../v1.1/train-noisy_processed.tsv", column_name="src_txt")
+    tokenized_test_text = get_tokenized_text("../../../v1.1/en/de/dev/segments.tok.en")
+    add_tokenized_text_to_target_old_fashioned("../../../v1.1/dev_st_en_de.tsv", tokenized_test_text,
+                                               "../../../v1.1/dev_processed.tsv", column_name="src_txt")
+    tokenized_test_text = get_tokenized_text("../../../v1.1/en/de/test/segments.tok.en")
+    add_tokenized_text_to_target_old_fashioned("../../../v1.1/test_st_en_de.tsv", tokenized_test_text,
+                                               "../../../v1.1/test_processed.tsv", column_name="src_txt")
 
 
 if __name__ == "__main__":

@@ -58,4 +58,4 @@ For instance, to train a small AST transformer model with `imit_kd` and a NMT ex
  --save-dir ${ST_SAVE_DIR}  --bpe-codes ${PATH_TO_BPE} --warmup-updates 10000 --clip-norm 10.0 --seed 1 --update-freq 8  --patience 10 --load-pretrained-encoder-from ${ASR_MODEL} --encoder-freezing-updates 1000`
  
  
-__**Important**: Training such model requires at least 40 GB of RAM and a GPU with at least 20 GB of VRAM, 48GB is better suited.__
+__**Important**: Training such a model requires at least 40 GB of RAM and a GPU with at least 20 GB of VRAM, 48GB is better suited.__
