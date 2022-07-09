@@ -20,7 +20,7 @@ In order for ImitKD to work, several changes were made to the fairseq framework:
     * [imitKD_ast.py](fairseq/fairseq/criterions/imitKD_ast.py) (ImitKD-full for AST expert and AST student)
     * [imitKD_ast_pure_kd.py](fairseq/fairseq/criterions/imitKD_ast_pure_kd.py) (word-level KD for AST expert and AST student)
     * [kd_expert_copy.py](fairseq/fairseq/criterions/kd_expert_copy.py) (word-level KD for NMT expert and AST student)
-    * [imitKD_pipeline_nmt_training.py](fairseq/fairseq/criterions/imitKD_pipeline_nmt_training.py) (ImitKD-full training for NMT component in ASR-NMT cascade)
+    * [imitKD_pipeline_nmt_training.py](fairseq/fairseq/criterions/imitKD_pipeline_nmt_training.py) (ImitKD-full training for NMT comonent in ASR-NMT cascade)
 * other criterions were added as proof-of-word but are not recommended for usage
 
 
@@ -42,6 +42,16 @@ pip install --editable .
 ```
 
 Installing fairseq is required to have access to the changes made to the framework in this repo.
+
+
+## Datasets
+
+| Dataset                                              | hours of speech    | total number of samples |
+| :--------------------------------------------------- | -----------------: | ----------------------: |
+| MUST-C (en-de)                                       | 408                | 234K                    |
+| COVOST2 (en-de)                                      | 430                | 319K                    |
+| Europarl-ST (en-de)                                  | 83                 | 35.5                    |
+| Europarl-ST (en-de)                                  | 173                | 72.4K                   |
 
 
 
@@ -91,4 +101,86 @@ The best way to run experiments with generated transcripts is to:
 
 
 Alternatively, you may run the respective proof-of-work fairseq criterions that generate the transcripts during training. Note that this significantly increases the required VRAM and training time. Creating a synthetic dataset to sample from instead is *highly* recommended.
+
+
+
+## Results
+
+The following BLEU scores were reported for ImitKD training and the two baselines, word-level knowledge distillation (KD) and negative log-likelihood training (NLL) for ground truth targets.
+
+### MUST-C
+
+| MODEL: Training method                               | dev               | test    |
+| :--------------------------------------------------- | ----------------: | ------: |
+| AST RNN: NLL                                         | 14.6              | 14.1    |
+| AST RNN: KD                                          | 17.1              | 17.2    |
+| AST RNN: KDT                                         | 16.9              | 15.9    |
+| AST RNN: ImitKD-full                                 | 15.7              | 14.9    |
+| AST RNN: ImitKDT-full                                | 16.3              | 15.1    |
+| AST transformer: NLL                                 | 19.5              | 19.4    |
+| AST transformer: KD                                  | 22.2              | 22.3    |
+| AST transformer: KDT                                 | 22.5              | 22.6    |
+| AST transformer: ImitKD-full                         | 23.2              | 23.3    |
+| AST transformer: ImitKDT-full                        | 23.5              | 23.5    |
+
+### COVOST2
+
+| MODEL: Training method                               | dev               | test    |
+| :--------------------------------------------------- | ----------------: | ------: |
+| AST RNN: NLL                                         | 13.6              | 10.0    |
+| AST RNN: KD                                          | 14.6              | 11.1    |
+| AST RNN: KDT                                         | 14.1              | 10.6    |
+| AST RNN: ImitKD-full                                 | 13.1              | 10.1    |
+| AST RNN: ImitKDT-full                                | 12.8              | 9.7     |
+| AST transformer: NLL                                 | 18.4              | 14.6    |
+| AST transformer: wold-level knowledge distillation   | 21.3              | 17.7    |
+| AST transformer: ImitKD-full                         | 21.8              | 18.4    |
+| AST transformer: ImitKDT-full                        | 21.8              | 18.5    |
+
+### Europarl-ST: clean training set
+
+| MODEL: Training method                               | dev               | test    |
+| :--------------------------------------------------- | ----------------: | ------: |
+| AST RNN: NLL                                         | 13.8              | 14.4    |
+| AST RNN: KD                                          | 17.4              | 17.8    |
+| AST RNN: KDT                                         | 17.5              | 18.0    |
+| AST RNN: ImitKD-full                                 | 17.0              | 17.1    |
+| AST RNN: ImitKDT-full                                | 17.4              | 17.5    |
+
+
+### Europarl-ST: clean+noisy training set
+
+| MODEL: Training method                               | dev               | test    |
+| :--------------------------------------------------- | ----------------: | ------: |
+| AST RNN: NLL                                         | 17.5              | 17.3    |
+| AST RNN: KD                                          | 11.5              | 12.0    |
+| AST RNN: KDT                                         | 18.3              | 18.2    |
+| AST RNN: ImitKD-full                                 | 12.0              | 12.3    |
+| AST RNN: ImitKDT-full                                | 16.7              | 16.6    |
+
+
+
+## Conclusions
+
+ImitKD for AST with a NMT expert results in more performant models than can be achieved for NLL training (except COVOST2 RNNs).
+But AST transformers are required to efficiently utilize the expert and consequently outperform KD.
+
+Moreover, we found the audio transcripts in the dataset can be replaced with transcripts generated by an ASR model if the target translations are not replaced: For samples with incorrect transcripts, the expert views the prefix that is determined by the target translations as an incorrect translation of the input transcript as it cannot determine that its input is incorrect:
+The expert lattempts to continue the student hypothesis in a manner that turns the "incorrect" translation of the generated transcript into a correct one.
+As the above tables show the models trained with generated transcript achieve comparable performance.
+
+
+## References
+
+Lin, A.,  Wohlwend, J.,  Chen, H., Lei, T. : [Autoregressive Knowledge Distillation through Imitation Learning](https://arxiv.org/abs/2009.07253)
+Mattia A. Di Gangi, Roldano Cattoni, Luisa Bentivogli, Matteo Negri, and Marco Turchi. [MuST-C: a Multilingual Speech Translation Corpus](https://aclanthology.org/N19-1202/).
+
+Changhan Wang, Anne Wu, and Juan Miguel Pino. [Covost 2: A massively multilingual speech-to-text translation corpus. CoRR, abs/2007.10310, 2020a.]( https://arxiv.org/abs/2007.10310)
+Javier Iranzo-Sánchez, Joan Albert Silvestre-Cerdà, Javier Jorge, Nahuel Roselló, Adrià Giménez, Albert Sanchis, Jorge Civera, and Alfons Juan. [Europarl-st: A multilingual corpus for speech translation of parliamentary debates. In ICASSP 2020 - 2020 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP), pages 8229–8233, 2020. doi: 10.1109/ICASSP40776.2020.9054626](https://doi.org/10.48550/arXiv.1911.03167)
+
+Myle Ott, Sergey Edunov, Alexei Baevski, Angela Fan, Sam Gross, Nathan Ng, David Grangier, and Michael Auli. [fairseq: A fast, extensible toolkit for sequence modeling](https://aclanthology.org/N19-4009/)
+
+Changhan Wang and Yun Tang and Xutai Ma and Anne Wu and Dmytro Okhonko and Juan Pino: [fairseq S2T: Fast Speech-to-Text Modeling with fairseq](https://aclanthology.org/2020.aacl-demo.6.pdf)
+
+Yuchen Liu, Hao Xiong, Zhongjun He, Jiajun Zhang, Hua Wu, Haifeng Wang, and Chengqing Zong: [End-to-end speech translation with knowledge distillation.](https://www.isca-speech.org/archive/pdfs/interspeech_2019/liu19d_interspeech.pdf)
 
