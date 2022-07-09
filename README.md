@@ -30,14 +30,16 @@ The repo contains an `environment.yml` that specifies the required dependencies 
 Simply create a new conda environment from the environment.yml by running `conda env create -f environment.yml`.
 Then change into the fairseq directory and install fairseq:
 
-`cd fairseq`
-
-`pip install .`
+```
+cd fairseq
+pip install .
+```
 
 
 If you want to develop locally without reinstall fairseq after every change run:
-
-`pip install --editable .`
+```
+pip install --editable .
+```
 
 Installing fairseq is required to have access to the changes made to the framework in this repo.
 
@@ -64,11 +66,11 @@ For COVOST2 and MUST-C:
 Model training and evaluation is done as is specified in the fairseq framework.
 For instance, to train a small AST transformer model with `imit_kd` and a NMT expert run:
 
-
-`fairseq-train ${COVOST_ROOT}/en --config-yaml config_st_en_de.yaml --train-subset train_processed --valid-subset dev_processed  --num-workers 8 --max-tokens 50000  --max-update 30000   --task speech_to_text --criterion imit_kd --report-accuracy --arch s2t_transformer_s  
---optimizer adam --lr 0.002 --lr-scheduler inverse_sqrt --seed 1 --clip-norm 10.0 --expert ${PATH_TO_EXPERT_MODEL} --expert-vocab-tgt ${PATH_TO_EXPERT_MODEL_DICTIONARY}  --expert-vocab-src ${PATH_TO_EXPERT_MODEL_SRC_DICTIONARY} --path  ${PATH_TO_EXPERT_MODEL_DIRECTORY} 
+```
+fairseq-train ${COVOST_ROOT}/en --config-yaml config_st_en_de.yaml --train-subset train_processed --valid-subset dev_processed  --num-workers 8 --max-tokens 50000  --max-update 30000   --task speech_to_text --criterion imit_kd --report-accuracy --arch s2t_transformer_s  \
+--optimizer adam --lr 0.002 --lr-scheduler inverse_sqrt --seed 1 --clip-norm 10.0 --expert ${PATH_TO_EXPERT_MODEL} --expert-vocab-tgt ${PATH_TO_EXPERT_MODEL_DICTIONARY}  --expert-vocab-src ${PATH_TO_EXPERT_MODEL_SRC_DICTIONARY} --path  ${PATH_TO_EXPERT_MODEL_DIRECTORY} \
  --save-dir ${ST_SAVE_DIR}  --bpe-codes ${PATH_TO_BPE} --warmup-updates 10000 --clip-norm 10.0 --seed 1 --update-freq 8  --patience 10 --load-pretrained-encoder-from ${ASR_MODEL} --encoder-freezing-updates 1000`
- 
+ ```
  
 __**Important**: Training such a model requires at least 40 GB of RAM and a GPU with at least 20 GB of VRAM, 48GB is better suited.__
 
@@ -81,7 +83,9 @@ The best way to run experiments with generated transcripts is to:
 1. use the ASR model to transcribe the speech data
 2. use the NMT expert model to translate those transcripts if you want to use generated target translations
 3. run `create_wmt19_generated_dataset.py` to create a new dataset of generated trancripts:
-    ``python create_wmt19_generated_dataset.py -o ${fairseq-generate log file of NMT expert's translations} -a ${fairseq-generate log file of ASR model's transcripts} -d ${AST dataset file}``
+```
+    python create_wmt19_generated_dataset.py -o ${fairseq-generate log file of NMT expert's translations} -a ${fairseq-generate log file of ASR model's transcripts} -d ${AST dataset file}
+```
 4. use the new dataset just like the original datasets 
 
 
