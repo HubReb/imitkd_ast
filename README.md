@@ -1,5 +1,7 @@
 # knn_ast_KD_nmt
 
+
+
 ## general information
 
 Implementation of [Imitation-based Knowledge Distillation](https://github.com/asappresearch/imitkd) from the paper ["Autoregressive Knowledge Distillation through Imitation Learning"](https://arxiv.org/abs/2009.07253) for Automatic Speech Translation (AST).
@@ -11,6 +13,7 @@ For usage of the fairseq framework please see the (fairseq documentation)[https:
 
 In order for ImitKD to work, several changes were made to the fairseq framework:
 * training loop was changed
+* [dataset class](fairseq/fairseq/data/audio/speech_to_text_dataset.py) for speech-to-text was changed 
 * several files were added to the criterions
     * [imitKD.py](fairseq/fairseq/criterions/imitKD.py) (ImitKD-optimal)
     * [imitKD_CE.py](fairseq/fairseq/criterions/imitKD_CE.py) (ImitKD-full)
@@ -21,13 +24,22 @@ In order for ImitKD to work, several changes were made to the fairseq framework:
 * other criterions were added as proof-of-word but are not recommended for usage
 
 
-The best way to run experiments with generated transcripts is to:
-1. use the ASR model to transcribe the speech data
-2. use the NMT expert model to translate those transcripts if you want to use generated target translations
-3. run `create_wmt19_generated_dataset.py` to create a new dataset of generated trancripts:
-    ``python create_wmt19_generated_dataset.py -o ${fairseq-generate log file of NMT expert's translations} -a ${fairseq-generate log file of ASR model's transcripts} -d ${AST dataset file}``
-4. use the new dataset just as the original datasets 
+## Setup
 
+The repo contains an `environment.yml` that specifies the required dependencies and python-version.
+Simply create a new conda environment from the environment.yml by running `conda env create -f environment.yml`.
+Then change into the fairseq directory and install fairseq:
+
+`cd fairseq`
+
+`pip install .`
+
+
+If you want to develop locally without reinstall fairseq after every change run:
+
+`pip install --editable .`
+
+Installing fairseq is required to have access to the changes made to the framework in this repo.
 
 
 
@@ -59,3 +71,20 @@ For instance, to train a small AST transformer model with `imit_kd` and a NMT ex
  
  
 __**Important**: Training such a model requires at least 40 GB of RAM and a GPU with at least 20 GB of VRAM, 48GB is better suited.__
+
+
+## a note on replacing gold transcripts with generated transcripts
+
+
+
+The best way to run experiments with generated transcripts is to:
+1. use the ASR model to transcribe the speech data
+2. use the NMT expert model to translate those transcripts if you want to use generated target translations
+3. run `create_wmt19_generated_dataset.py` to create a new dataset of generated trancripts:
+    ``python create_wmt19_generated_dataset.py -o ${fairseq-generate log file of NMT expert's translations} -a ${fairseq-generate log file of ASR model's transcripts} -d ${AST dataset file}``
+4. use the new dataset just as the original datasets 
+
+
+
+Alternatively, you may run the respective proof-of-work fairseq criterions that generate the transcripts during training. Note that this significantly increases the required VRAM and training time. Creating a synthetic dataset to sample from instead is *highly* recommended.
+
