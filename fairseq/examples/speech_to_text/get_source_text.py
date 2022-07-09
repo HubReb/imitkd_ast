@@ -7,6 +7,7 @@ from pathlib import Path
 
 
 def get_column_text(filename, column_name="tgt_txt"):
+    """get text data in one column"""
     df = pd.read_csv(filename, sep="\t")
     if column_name == "tgt_txt":
         text = "\n".join(df.tgt_text.tolist())
@@ -29,6 +30,7 @@ def get_tokenized_text(filename):
 
 
 def add_tokenized_text_to_target(filename, tokenized_text, result_filename, column_name="tgt_txt"):
+    """Replace non-preprocessed text with pre-processed text for either target or source"""
     df = pd.read_csv(filename, sep="\t")
     if column_name == "tgt_txt":
         print(len(df.tgt_text),  len(tokenized_text.split("\n")[:-1]))
@@ -46,6 +48,7 @@ def add_tokenized_text_to_target(filename, tokenized_text, result_filename, colu
 
 
 def get_source_text_old_fashioned(filename, column_name="tgt_txt", column_number=6):
+    """ to be used if pandas refuses to recognizes seperators"""
     if column_name == "tgt_txt":
         index = 4
         if column_number != 6:
@@ -61,6 +64,7 @@ def get_source_text_old_fashioned(filename, column_name="tgt_txt", column_number
 
 
 def add_tokenized_text_to_target_old_fashioned(filename, tokenized_text, result_filename, column_name="tgt_txt"):
+    """ Replace non-preprocessed text with pre-processed text for either target or source: To be used if csv cannot be loaded with pandas"""
     with open(filename) as f:
         data = f.read().split("\n")[:-1]
     if column_name == "tgt_txt":
@@ -81,6 +85,7 @@ def add_tokenized_text_to_target_old_fashioned(filename, tokenized_text, result_
 
 
 def add_tokenized_text_to_target_old_fashioned_train(filename, tokenized_text, result_filename, column_name="tgt_txt"):
+    """ Replace non-preprocessed text with pre-processed text for either target or source: To be used if csv cannot be loaded with pandas (special format required for MUST-C train"""
     with open(filename) as f:
         data = f.read().split("\n")[:-1]
     if column_name == "tgt_txt":
@@ -101,6 +106,7 @@ def add_tokenized_text_to_target_old_fashioned_train(filename, tokenized_text, r
 
 
 def get_text_from_datasets():
+    """ Extract src and target text for all files """
     target_text = get_column_text("covost/en/train_st_en_de_with_source_text.tsv")
     save_text_in_file("covost/train_text.txt", target_text)
     target_text = get_column_text("covost/en/dev_st_en_de_with_source_text.tsv")
@@ -128,6 +134,7 @@ def get_text_from_datasets():
 
 
 def create_processed_datasets():
+    """ Replace sourc and target text with pre-processed source and target for all files """
     
     gen_vocab(Path("covost_processed_text/train.tok.de"), Path("covost/en/spm_bpe8000_ast"), "bpe", 8000)
 
