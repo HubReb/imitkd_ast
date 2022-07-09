@@ -32,4 +32,25 @@ The best way to run experiments with generated transcripts is to:
 
 
 
+## data pre-processing
 
+Data pre-processing was done as explained in fairseq speech-to-text module. Note that if you create your own datasets and want to use a NMT expert, you need to process the target transcripts and translations in the speech translation/recognition dataset the same way you processed the data for the NMT task.
+
+Scripts to extract source transcripts and target translations from the csv Datafiles created by the speech-to-text pre-processing are included.
+
+
+For COVOST2 and MUST-C:
+1.  adapt the file paths in [get_src_to_st.py](fairseq/get_src_to_st.py) to fit your setup and simply run `python get_src_to_st.py`.
+2. adapt the file paths in [get_source_text.py](fairseq/examples/speech_to_text/get_source_text.py) to your setup and run `python get_source_text.py`
+3. the extracted data files are saved in `${dataset_name}/${split_name}`
+4. process the extracted text data the same you did for your NMT expert, e.g. by adapting [prepare-rest.sh](fairseq/examples/speech_to_text/prepare-rest.sh)
+5. run `python get_source_text.py` again
+6. adapt the configuration files to point to your NMT expert's vocabulary and BPE.
+
+## model training
+
+Model training is done as is specified in the fairseq framework.
+For instance,
+`fairseq-train ${COVOST_ROOT}/en --config-yaml config_st_en_de.yaml --train-subset train_processed --valid-subset dev_processed  --num-workers 8 --max-tokens 50000  --max-update 30000   --task speech_to_text --criterion imit_kd --report-accuracy --arch s2t_transformer_s \ 
+--optimizer adam --lr 0.002 --lr-scheduler inverse_sqrt --seed 1 --clip-norm 10.0 --expert ${PATH_TO_EXPERT_MODEL} --expert-vocab-tgt ${PATH_TO_EXPERT_MODEL_DICTIONARY}  --expert-vocab-src ${PATH_TO_EXPERT_MODEL_SRC_DICTIONARY} --path  ${PATH_TO_EXPERT_MODEL_DICTIONARY} \
+ --save-dir ${ST_SAVE_DIR}  --bpe-codes ${PATH_TO_BPE} --warmup-updates 10000 --clip-norm 10.0 --seed 1 --update-freq 8  --patience 10 --load-pretrained-encoder-from ${ASR_MODEL} --encoder-freezing-updates 1000`
