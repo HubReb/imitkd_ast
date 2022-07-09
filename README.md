@@ -47,9 +47,9 @@ For COVOST2 and MUST-C:
 5. run `python get_source_text.py` again
 6. adapt the configuration files to point to your NMT expert's vocabulary and BPE.
 
-## model training
+## model training and evaluation
 
-Model training is done as is specified in the fairseq framework.
+Model training and evaluation is done as is specified in the fairseq framework.
 For instance, to train a small AST transformer model with `imit_kd` and a NMT expert run:
 
 
