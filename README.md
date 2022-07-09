@@ -22,11 +22,11 @@ In order for ImitKD to work, several changes were made to the fairseq framework:
 
 
 The best way to run experiments with generated transcripts is to:
-    1. use the ASR model to transcribe the speech data
-    2. use the NMT expert model to translate those transcripts if you want to use generated target translations
-    3. run `create_wmt19_generated_dataset.py` to create a new dataset of generated trancripts:
-        ``python create_wmt19_generated_dataset.py -o ${fairseq-generate log file of NMT expert's translations} -a ${fairseq-generate log file of ASR model's transcripts} -d ${AST dataset file}``
-    4. use the new dataset just as the original datasets 
+1. use the ASR model to transcribe the speech data
+2. use the NMT expert model to translate those transcripts if you want to use generated target translations
+3. run `create_wmt19_generated_dataset.py` to create a new dataset of generated trancripts:
+    ``python create_wmt19_generated_dataset.py -o ${fairseq-generate log file of NMT expert's translations} -a ${fairseq-generate log file of ASR model's transcripts} -d ${AST dataset file}``
+4. use the new dataset just as the original datasets 
 
 
 
