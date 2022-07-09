@@ -1,0 +1,22 @@
+name: ma_env
+channels:
+  - defaults
+dependencies:
+  - python=3.7
+  - nltk
+  - sentencepiece
+  - pandas
+  - cython
+  - torchvision
+  - cudatoolkit=11.3
+  - pytorch
+  - torchaudio
+  - fastbpe
+  - faiss-gpu
+  - scikit-learn
+  - jupyter
+  - matplotlib
+  - seaborn
+  - mpl-probscale
+  - tensorboard
+  - black
