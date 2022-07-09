@@ -115,7 +115,7 @@ These are given as KDT and ImitKD.T
 | MODEL: Training method                               | dev               | test    |
 | :--------------------------------------------------- | ----------------: | ------: |
 | AST RNN: NLL                                         | 14.6              | 14.1    |
-| AST RNN: KD                                          | 17.1              | 17.2    |
+| AST RNN: KD                                          | 17.9              | 17.2    |
 | AST RNN: KDT                                         | 16.9              | 15.9    |
 | AST RNN: ImitKD-full                                 | 15.7              | 14.9    |
 | AST RNN: ImitKDT-full                                | 16.3              | 15.1    |
@@ -134,8 +134,9 @@ These are given as KDT and ImitKD.T
 | AST RNN: KDT                                         | 14.1              | 10.6    |
 | AST RNN: ImitKD-full                                 | 13.1              | 10.1    |
 | AST RNN: ImitKDT-full                                | 12.8              | 9.7     |
-| AST transformer: NLL                                 | 18.4              | 14.6    |
-| AST transformer: wold-level knowledge distillation   | 21.3              | 17.7    |
+| AST transformer: NLL                                 | 18.4              | 14.2    |
+| AST transformer: KD                                  | 21.3              | 17.7    |
+| AST transformer: KDT                                 | 21.7              | 18.0    |
 | AST transformer: ImitKD-full                         | 21.8              | 18.4    |
 | AST transformer: ImitKDT-full                        | 21.8              | 18.5    |
 
@@ -147,7 +148,7 @@ These are given as KDT and ImitKD.T
 | AST RNN: KD                                          | 17.4              | 17.8    |
 | AST RNN: KDT                                         | 17.5              | 18.0    |
 | AST RNN: ImitKD-full                                 | 17.0              | 17.1    |
-| AST RNN: ImitKDT-full                                | 17.4              | 17.5    |
+| AST RNN: ImitKDT-full                                | 17.0              | 17.0    |
 
 
 ### Europarl-ST: clean+noisy training set
@@ -158,7 +159,7 @@ These are given as KDT and ImitKD.T
 | AST RNN: KD                                          | 11.5              | 12.0    |
 | AST RNN: KDT                                         | 18.3              | 18.2    |
 | AST RNN: ImitKD-full                                 | 12.0              | 12.3    |
-| AST RNN: ImitKDT-full                                | 16.7              | 16.6    |
+| AST RNN: ImitKDT-full                                | 16.6              | 16.6    |
 
 
 
