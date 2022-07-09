@@ -175,6 +175,7 @@ As the above tables show the models trained with generated transcript achieve co
 ## References
 
 Lin, A.,  Wohlwend, J.,  Chen, H., Lei, T. : [Autoregressive Knowledge Distillation through Imitation Learning](https://arxiv.org/abs/2009.07253)
+
 Mattia A. Di Gangi, Roldano Cattoni, Luisa Bentivogli, Matteo Negri, and Marco Turchi. [MuST-C: a Multilingual Speech Translation Corpus](https://aclanthology.org/N19-1202/).
 
 Changhan Wang, Anne Wu, and Juan Miguel Pino. [Covost 2: A massively multilingual speech-to-text translation corpus. CoRR, abs/2007.10310, 2020a.]( https://arxiv.org/abs/2007.10310)
