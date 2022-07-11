@@ -39,8 +39,7 @@ def create_probs_plot(
     gs = gridspec.GridSpec(nrows, 4, hspace=0.9)
     transcript = dataframe_row.transcript
     target = dataframe_row.target
-    hypo = dataframe_row["hypo"][4:]
-    prefix_at_timestep = hypo.split()
+    prefix_at_timestep = target.split()
     correct_transcript = dataframe_row["original source text"]
 
     for row_number, prob_at_timestep in enumerate(np_array):
@@ -84,8 +83,8 @@ def choose_row_and_numpy_file(
     relevant_data_rows = dataframe.loc[dataframe.WER > wer]
     relevant_data_rows = relevant_data_rows.head(100)
     print(len(relevant_data_rows))
-    plt.rc("font", size=15)
-    plt.rc("axes", labelsize=20)
+    plt.rc("font", size=45)
+    plt.rc("axes", labelsize=30)
     plt.hist(
         relevant_data_rows.WER.clip(upper=100).values,
         bins="auto",
@@ -93,8 +92,8 @@ def choose_row_and_numpy_file(
         color="#0504aa",
     )
     plt.grid()
-    plt.xlabel("WER")
-    plt.ylabel("Frequency")
+    plt.xlabel("WER", fontsize=65)
+    plt.ylabel("Frequency", fontsize=65)
     plt.show()
     relevant_data_rows = relevant_data_rows.loc[dataframe.WER > 0]
     print(len(relevant_data_rows))
@@ -122,19 +121,12 @@ def choose_row_and_numpy_file(
 
 
 # load vocabulary into fairseq dictionary
-dictionary, data = get_data(csv_filename="covost_wer_few.csv")
-# plot probabilities
-choose_row_and_numpy_file(
-    data,
-    "expert_probs_kd_on_translations_few",
-    dictionary,
-    0,
-    "asrkd_sample_100_above_0",
-    to_keep=100,
-)
+
+dictionary, data = get_data(csv_filename="covost_wers.csv")
+
 # plot WER-histogram of entire dataset
-plt.rc("font", size=15)
-plt.rc("axes", labelsize=20)
+plt.rc("font", size=45)
+plt.rc("axes", labelsize=30)
 plt.hist(data.WER.clip(upper=100).values, bins="auto", rwidth=0.9, color="#0504aa")
 plt.grid()
 plt.xlabel("WER")
@@ -154,4 +146,13 @@ plt.rc("font", size=15)
 plt.rc("axes", labelsize=20)
 plt.show()
 wer = 90
-# choose_row_and_numpy_file(data, "expert_probs_asrimitkd_all_wer", dictionary, wer, "asrimitkd_trained_wer_above_0_9")
+# plot probabilities
+dictionary, data = get_data(csv_filename="covost_wer_all.csv")
+choose_row_and_numpy_file(
+    data,
+    "expert_probs_kd_on_translations_few",
+    dictionary,
+    0,
+    "asrkd_sample_100_above_0",
+    to_keep=100,
+)
