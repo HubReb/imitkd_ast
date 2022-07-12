@@ -5,7 +5,7 @@
 ## General information
 
 Implementation of [Imitation-based Knowledge Distillation](https://github.com/asappresearch/imitkd) from the paper ["Autoregressive Knowledge Distillation through Imitation Learning"](https://arxiv.org/abs/2009.07253) for Automatic Speech Translation (AST).
-Instead of an AST expert, The expert model is a trained Neural Machine Translation (NMT) model.
+Instead of an AST expert, the expert model is a trained Neural Machine Translation (NMT) model.
 
 The implementation is entirely based the [fairseq framework](https://github.com/facebookresearch/fairseq), specifically on the [speech-to-text module](https://github.com/facebookresearch/fairseq/tree/main/examples/speech_to_text).
 For usage of the fairseq framework please see the [fairseq documentation](https://fairseq.readthedocs.io/en/latest/).
@@ -31,7 +31,7 @@ Simply create a new conda environment from the environment.yml by running:
 ```
 conda env create -f environment.yml
 ```
-Then change into the fairseq directory and install fairseq:
+Then activate the environment, change into the fairseq directory and install fairseq:
 
 ```
 cd fairseq
@@ -39,12 +39,12 @@ pip install .
 ```
 
 
-If you want to develop locally without reinstall fairseq after every change run:
+If you want to develop locally without reinstalling fairseq after every change run:
 ```
 pip install --editable .
 ```
 
-Installing fairseq is required to have access to the changes made to the framework in this repo.
+Installing fairseq like this is required to have access to the changes made to the framework in this repo.
 
 
 ## Datasets
@@ -61,18 +61,18 @@ Installing fairseq is required to have access to the changes made to the framewo
 
 ## Data pre-processing
 
-Data pre-processing was done as explained in fairseq speech-to-text module. Note that if you create your own datasets and want to use a NMT expert, you need to process the target transcripts and translations in the speech translation/recognition dataset the same way you processed the data for the NMT task.
+Audo data pre-processing was done as explained in fairseq speech-to-text module. Note that if you create your own datasets and want to use a NMT expert, you need to process the target transcripts and translations in the speech translation/recognition dataset the same way you processed the data for the NMT task.
 
 Scripts to extract source transcripts and target translations from the csv Datafiles created by the speech-to-text pre-processing are included.
 
 
 For COVOST2 and MUST-C:
-1.  adapt the file paths in [get_src_to_st.py](fairseq/get_src_to_st.py) to fit your setup and simply run `python get_src_to_st.py`.
-2. adapt the file paths in [get_source_text.py](fairseq/examples/speech_to_text/get_source_text.py) to your setup and run `python get_source_text.py`
-3. the extracted data files are saved in `${dataset_name}/${split_name}`
-4. process the extracted text data the same you did for your NMT expert, e.g. by adapting [prepare-rest.sh](fairseq/examples/speech_to_text/prepare-rest.sh)
-5. run `python get_source_text.py` again
-6. adapt the configuration files to point to your NMT expert's vocabulary and BPE.
+1. Adapt the file paths in [get_src_to_st.py](fairseq/get_src_to_st.py) to fit your setup and simply run `python get_src_to_st.py`.
+2. Adapt the file paths in [get_source_text.py](fairseq/examples/speech_to_text/get_source_text.py) to your setup and run `python get_source_text.py`
+3. The extracted data files are saved in `${dataset_name}/${split_name}`
+4. Process the extracted text data the same you did for your NMT expert, e.g. by adapting [prepare-rest.sh](fairseq/examples/speech_to_text/prepare-rest.sh).
+5. Run `python get_source_text.py` again
+6. Adapt the configuration files to point to your NMT expert's vocabulary and BPE.
 
 ## Model training and evaluation
 
@@ -85,7 +85,7 @@ fairseq-train ${COVOST_ROOT}/en --config-yaml config_st_en_de.yaml --train-subse
  --save-dir ${ST_SAVE_DIR}  --bpe-codes ${PATH_TO_BPE} --warmup-updates 10000 --clip-norm 10.0 --seed 1 --update-freq 8  --patience 10 --load-pretrained-encoder-from ${ASR_MODEL} --encoder-freezing-updates 1000`
  ```
  
-__**Important**: Training such a model requires at least 40 GB of RAM and a GPU with at least 20 GB of VRAM, 48GB is better suited.__
+__**Important**: Training such a model requires at least 40 GB of RAM and a GPU with at least 20 GB of VRAM, 48GB of VRAM are recommended.__
 
 
 ## A note on replacing gold transcripts with generated transcripts
@@ -180,7 +180,7 @@ Simply run:
 conda env create -f environment.yml
 ```
 
-Create a file that list the logs created by running fairseq-generate (*important*: Do not run fairseq-generate with the --quiet flag. If you do, fairseq-generates only writes your configuration and the detokenized BLEU score into the log file).
+Create a file that list the logs created by running fairseq-generate (*important*: Do not run fairseq-generate with the --quiet flag. If you do, fairseq-generates only saves he detokenized BLEU score to the log file).
 Write each file name to a new line, e.g.:
 
 ```
@@ -194,17 +194,17 @@ Then run
 bash eval_script.sh ${name of file that contains the list of file names}
 ```
 
-The detokenized BLEU scores can then be found in the folder `result_scores`. 
+The detokenized BLEU scores can be found in the folder `result_scores`. 
 The name of each file in this folder is `${file_name}_detokenized_bleu_score`.
 
 ## Conclusions
 
 ImitKD for AST with a NMT expert results in more performant models than can be achieved for NLL training (except COVOST2 RNNs).
-But AST transformers are required to efficiently utilize the expert and consequently outperform KD.
+But AST transformers are required to efficiently utilize the expert and outperform KD.
 
 Moreover, we found the audio transcripts in the dataset can be replaced with transcripts generated by an ASR model if the target translations are not replaced: For samples with incorrect transcripts, the expert views the prefix that is determined by the target translations as an incorrect translation of the input transcript as it cannot determine that its input is incorrect:
 The expert lattempts to continue the student hypothesis in a manner that turns the "incorrect" translation of the generated transcript into a correct one.
-As the above tables show the models trained with generated transcript achieve comparable performance.
+As the above tables show, the models trained with generated transcript achieve comparable performance.
 
 
 ## References
