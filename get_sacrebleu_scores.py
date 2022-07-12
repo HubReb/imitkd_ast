@@ -15,7 +15,7 @@ for i, file in enumerate(os.listdir(directory)):
             + filename.split("sources.txt.detok")[0]
             + "hypothesis.txt.detok"
         )
-        command = f"sacrebleu {source} -i {hypo} -m bleu ter chrf --chrf-word-order 2 > result_scores/{filename.split('_sources.txt.detok')[0] + '_bleu_score'} &"
+        command = f"sacrebleu {source} -i {hypo} -m bleu ter chrf --chrf-word-order 2 > result_scores/{filename.split('_sources.txt.detok')[0] + 'detokenized_bleu_score'} &"
         result_commands.append(command)
     if i > 0 and i % 42 == 0:
         result_commands.append("sleep 20s")
