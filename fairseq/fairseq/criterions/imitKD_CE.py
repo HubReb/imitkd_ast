@@ -200,7 +200,7 @@ class ImitKD(FairseqCriterion):
 
     def generate_imit_batch(self, student: Callable, sample: Dict) -> Dict:
         """
-        Uses student model to generate hypothesis if probability function beta yields 1.
+        Uses student model to generate hypothesis according to beta
 
         Args:
             student: model to train
