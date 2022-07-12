@@ -1,4 +1,4 @@
-name: ma_env
+name: train
 channels:
   - defaults
 dependencies:
@@ -8,7 +8,7 @@ dependencies:
   - pandas
   - cython
   - torchvision
-  - cudatoolkit=11.3
+  - cudatoolkit=11.1
   - pytorch
   - torchaudio
   - fastbpe
@@ -19,4 +19,3 @@ dependencies:
   - seaborn
   - mpl-probscale
   - tensorboard
-  - black
