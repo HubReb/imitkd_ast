@@ -1,5 +1,8 @@
 # !/usr/bin/env bash
 
+mkdir result_folder/
+mkdir result_folder_detok/
+mkdir result_scores
 
 python get_references_and_hypothesis.py $1
 
