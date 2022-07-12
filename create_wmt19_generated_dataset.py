@@ -20,7 +20,7 @@ def get_references_and_hypotheses(data):
     return references2hypos
 
 
-def create_generated_dateset(reference2hypos, dataset, reference2transcripts=None):
+def create_generated_dataset(reference2hypos, dataset, reference2transcripts=None):
     """replace gold transcripts and targets with generated ones"""
     dataframe = pd.read_csv(dataset, sep="\t")
     # get values for quicker access
@@ -88,7 +88,7 @@ def create_generated_dateset(reference2hypos, dataset, reference2transcripts=Non
 
 
 def run(generation_file, dataset_file, audiotranscriptsfile=None):
-    """ extract references and hypotheses from generation_file, load ast dataset from dataset_file and replace target (and transcripts) in dateset"""
+    """ extract references and hypotheses from generation_file, load ast dataset from dataset_file and replace target (and transcripts) in dataset"""
     if generation_file != []:
         reference2hypos = get_references_and_hypotheses(read_file(generation_file))
     else:
@@ -97,11 +97,11 @@ def run(generation_file, dataset_file, audiotranscriptsfile=None):
         audio_transcripts = get_references_and_hypotheses(
             read_file(audiotranscriptsfile)
         )
-        dataset = create_generated_dateset(
+        dataset = create_generated_dataset(
             reference2hypos, dataset_file, audio_transcripts
         )
     else:
-        dataset = create_generated_dateset(reference2hypos, dataset_file)
+        dataset = create_generated_dataset(reference2hypos, dataset_file)
     if audiotranscriptsfile:
         if generation_file != []:
             dataset.to_csv(
