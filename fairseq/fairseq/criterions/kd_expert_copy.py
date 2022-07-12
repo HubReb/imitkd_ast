@@ -12,16 +12,12 @@ import sentencepiece as spm
 import fastBPE
 
 import torch
-from torch.nn.functional import kl_div
-from torch.distributions import Categorical
 
 from fairseq import metrics, utils
 from fairseq.criterions import FairseqCriterion, register_criterion
 from fairseq.dataclass import FairseqDataclass
 from fairseq.checkpoint_utils import load_model_ensemble
 from fairseq.data import Dictionary
-from fairseq.sequence_generator import SequenceGenerator
-from nltk.translate.bleu_score import sentence_bleu
 from fairseq.criterions.helper_functions import valid_loss, collate_tokens
 
 
@@ -71,6 +67,19 @@ def imit_kd_loss(
         model_dict,
         source_lengths,
 ):
+    """
+    KD (word-level kd): Calculates cross-entropy loss between expert and student model
+
+    Args:
+        generated_dataset: dataset batch with the reference translations
+        model: the student model that is trained
+        expert: the NMT expert
+        source_text: the source text as subword units to give the NMT model as input
+        model_dict: vocabulary represented as fairseq-dictionary
+        source_lengths: lengths of the source texts
+    Returns:
+        cross-entropy loss between expert and student model
+    """
     sample_expert = {
         "id": generated_dataset["id"],
         "net_input": {
@@ -239,10 +248,13 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
             eos_at_beginning: bool = False
     ) -> Tuple[torch.IntTensor, List[int]]:
         """
-        Turn the tokenized source text into bpe encodings.
-        :param sample: dataset batch
-        :param eos_at_beginning: whether to put EOS token at the beginning of each sample (required for previous output tokens)
-        :return: Tuple of bpe encoded source text and list of integers determing the number of bp for each sample
+        Turns the tokenized source text into bpe encodings.
+
+        Args:
+            sample: dataset batch
+            eos_at_beginning: whether to put EOS token at the beginning of each sample (required for previous output tokens)
+        Returns:
+            Tuple of bpe encoded source text and list of integers determing the number of bp for each sample
         """
         source_text = sample["net_input"]["src_text"]
         source_texts = []

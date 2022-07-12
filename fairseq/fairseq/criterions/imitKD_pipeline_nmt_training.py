@@ -74,6 +74,20 @@ def imit_kd_loss(
         source_lengths,
         ignore_index,
 ):
+    """
+    ImitKD-full for NMT model in cascade: Calculates cross-entropy loss between expert and student model
+
+    Args:
+        generated_dataset: dataset batch with the reference translations replaced with student hypotheses according
+            to beta
+        model: the student model that is trained
+        expert: the NMT expert
+        source_texts: the source text as subword units to give the NMT model as input
+        source_lengths: lengths of the source texts
+        ignore_index: index of padding
+    Returns:
+        cross-entropy loss between expert and NMT student model
+    """
     sample_expert = copy.deepcopy(generated_dataset)
     sample_expert["net_input"]["src_tokens"] = source_texts.cuda()
     sample_expert["net_input"]["src_lengths"] = source_lengths
@@ -177,12 +191,14 @@ class ImitKDPipelineNmtTraining(FairseqCriterion):
 
     def generate_imit_batch(self, student: Callable, sample: Dict, valid: bool) -> Dict:
         """
-        Use student model to generate hypothesis if probability function beta yields 1.
+        Uses student model to generate hypothesis if probability function beta yields 1.
 
-        :param student: model to train
-        :param sample: dataset batch
-        :param valid: if true, we do not replace any prev_output_tokens with student hypotheses.
-        :return: dataset batch with prev_output_tokens == student hypothesis if beta_i = 1
+        Args:
+            student: model to train
+            sample: dataset batch
+            valid: if true, we do not replace any prev_output_tokens with student hypotheses.
+        Returns:
+            dataset batch with prev_output_tokens == student hypothesis if beta_i = 1
         """
         with torch.no_grad():
             student = student.eval()
@@ -195,6 +211,7 @@ class ImitKDPipelineNmtTraining(FairseqCriterion):
             transcription_hypos = asr_generator._generate(sample)
             transcriptions = []
             lengths = []
+            # get transcripts to give to NMT student model
             for i, h in enumerate(transcription_hypos):
                 transcriptions.append(h[0]["tokens"])
                 lengths.append(len(h[0]["tokens"]))
@@ -280,10 +297,13 @@ class ImitKDPipelineNmtTraining(FairseqCriterion):
             eos_at_beginning: bool = False
     ) -> Tuple[torch.IntTensor, List[int]]:
         """
-        Turn the tokenized source text into bpe encodings.
-        :param sample: dataset batch
-        :param eos_at_beginning: whether to put EOS token at the beginning of each sample (required for previous output tokens)
-        :return: Tuple of bpe encoded source text and list of integers determing the number of bp for each sample
+        Turns the tokenized source text into bpe encodings.
+
+        Args:
+            sample: dataset batch
+            eos_at_beginning: whether to put EOS token at the beginning of each sample (required for previous output tokens)
+        Returns:
+            Tuple of bpe encoded source text and list of integers determing the number of bp for each sample
         """
         source_text = sample["net_input"]["src_text"]
         source_texts = []

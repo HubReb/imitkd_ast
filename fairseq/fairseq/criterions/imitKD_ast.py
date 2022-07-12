@@ -50,6 +50,17 @@ def imit_kd_loss(
         expert,
         model_dict,
 ):
+    """
+    ImitKD-full: Calculates cross-entropy loss between expert and student model
+
+    Args:
+        generated_dataset: dataset batch with the reference translations
+        model: the student model that is trained
+        expert: the AST expert
+        model_dict: vocabulary represented as fairseq-dictionary
+    Returns:
+        cross-entropy loss between expert and student model
+    """
     encoded_prevs = generated_dataset["net_input"]["prev_output_tokens"]
     sample_expert = copy.deepcopy(generated_dataset)
     sample_expert["net_input"]["prev_output_tokens"] = encoded_prevs.cuda()
@@ -139,11 +150,13 @@ class ImitKDAST(FairseqCriterion):
 
     def generate_imit_batch(self, student: Callable, sample: Dict) -> Dict:
         """
-        Use student model to generate hypothesis if probability function beta yields 1.
+        Uses student model to generate hypothesis if probability function beta yields 1.
 
-        :param student: model to train
-        :param sample: dataset batch
-        :return: dataset batch with prev_output_tokens == student hypothesis if beta_i = 1
+        Args:
+            student: model to train
+            sample: dataset batch
+        Returns:
+            dataset batch with prev_output_tokens == student hypothesis if beta_i = 1
         """
         with torch.no_grad():
             student = student.eval()

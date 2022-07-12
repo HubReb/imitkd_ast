@@ -69,6 +69,19 @@ def imit_kd_loss(
         model_dict,
         source_lengths
 ):
+    """
+    ImitKD-full: Calculate cross-entropy loss between expert and student model
+
+    Args:
+        generated_dataset: dataset batch with the reference translations replaced with student hypotheses according to beta
+        model: the student model that is trained
+        expert: the NMT expert
+        source_text: the source text as subword units to give the NMT model as input
+        model_dict: vocabulary represented as fairseq-dictionary
+        source_lengths: lengths of the source texts
+    Returns:
+        cross-entropy loss between expert and student model
+    """
     sample_expert = {
         "id": generated_dataset["id"],
         "net_input": {
@@ -187,11 +200,13 @@ class ImitKD(FairseqCriterion):
 
     def generate_imit_batch(self, student: Callable, sample: Dict) -> Dict:
         """
-        Use student model to generate hypothesis if probability function beta yields 1.
+        Uses student model to generate hypothesis if probability function beta yields 1.
 
-        :param student: model to train
-        :param sample: dataset batch
-        :return: dataset batch with prev_output_tokens == student hypothesis if beta_i = 1
+        Args:
+            student: model to train
+            sample: dataset batch
+        Returns:
+            dataset batch with prev_output_tokens == student hypothesis if beta_i = 1
         """
         with torch.no_grad():
             student = student.eval()
@@ -276,10 +291,13 @@ class ImitKD(FairseqCriterion):
             eos_at_beginning: bool = False
     ) -> Tuple[torch.IntTensor, List[int]]:
         """
-        Turn the tokenized source text into bpe encodings.
-        :param sample: dataset batch
-        :param eos_at_beginning: whether to put EOS token at the beginning of each sample (required for previous output tokens)
-        :return: Tuple of bpe encoded source text and list of integers determing the number of bp for each sample
+        Turns the tokenized source text into bpe encodings.
+
+        Args:
+            sample: dataset batch
+            eos_at_beginning: whether to put EOS token at the beginning of each sample (required for previous output tokens)
+        Returns:
+            Tuple of bpe encoded source text and list of integers determing the number of bp for each sample
         """
         source_text = sample["net_input"]["src_text"]
         source_texts = []

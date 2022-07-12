@@ -50,6 +50,17 @@ def imit_kd_loss(
         expert,
         model_dict,
 ):
+    """
+    KD (word-level kd): Calculates cross-entropy loss between expert and student model
+
+    Args:
+        generated_dataset: dataset batch with the reference translations
+        model: the student model that is trained
+        expert: the AST expert
+        model_dict: vocabulary represented as fairseq-dictionary
+    Returns:
+        cross-entropy loss between expert and student model
+    """
     encoded_prevs = generated_dataset["net_input"]["prev_output_tokens"]
     sample_expert = copy.deepcopy(generated_dataset)
     sample_expert["net_input"]["prev_output_tokens"] = encoded_prevs.cuda()

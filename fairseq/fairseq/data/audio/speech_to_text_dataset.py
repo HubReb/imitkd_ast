@@ -324,6 +324,7 @@ class SpeechToTextDataset(FairseqDataset):
                 move_eos_to_beginning=False,
             )
             target = target.index_select(0, order)
+            # add source text for NMT expert
             if self.src_texts is None:
                 target_lengths = torch.tensor(
                     [t.size(0) for _, _, t, _ in samples], dtype=torch.long
@@ -369,6 +370,7 @@ class SpeechToTextDataset(FairseqDataset):
                 "ntokens": ntokens,
                 "nsentences": len(samples),
             }
+        # add source text to data batch
         else:
             out = {
                 "id": indices,
