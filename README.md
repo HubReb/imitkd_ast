@@ -27,7 +27,10 @@ In order for ImitKD to work, several changes were made to the fairseq framework:
 ## Setup
 
 The repo contains an `environment.yml` that specifies the required dependencies and python-version.
-Simply create a new conda environment from the environment.yml by running `conda env create -f environment.yml`.
+Simply create a new conda environment from the environment.yml by running:
+```
+conda env create -f environment.yml
+```
 Then change into the fairseq directory and install fairseq:
 
 ```
@@ -162,6 +165,37 @@ These are given as KDT and ImitKD.T
 | AST RNN: ImitKDT-full                                | 16.6              | 16.6    |
 
 
+
+### BLEU calculation
+
+Due to the pre-processing applied to the text data, fairseq-generate calculates BLEU on the tokenized hypotheses and reference translations. 
+While this is fine if only the models in this repository are compared, it does not provide a meaningful comparison to commonly reported detokenized BLEU.
+
+
+The scripts to detokenize the translations are provided.
+__Important__: fairseq requires an older sacrebleu version than fairseq. The easiest method is to create a second conda environment for the evaluation of results.
+The configuration is given in eval_environment.yml.
+Simply run:
+```
+conda env create -f environment.yml
+```
+
+Create a file that list the logs created by running fairseq-generate (*important*: Do not run fairseq-generate with the --quiet flag. If you do, fairseq-generates only writes your configuration and the detokenized BLEU score into the log file).
+Write each file name to a new line, e.g.:
+
+```
+baseline_mustc_nll.log
+baseline_mustc_kd.log
+```
+
+Then run 
+
+```
+bash eval_script.sh ${name of file that contains the list of file names}
+```
+
+The detokenized BLEU scores can then be found in the folder `result_scores`. 
+The name of each file in this folder is `${file_name}_detokenized_bleu_score`.
 
 ## Conclusions
 
