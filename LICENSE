@@ -21,14 +21,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-===
-
-
-This repository is foremost a fork of the Fairseq repository (https://github.com/facebookresearch/fairseq} from March, 2021, as uploaded in commit https://gitlab.cl.uni-heidelberg.de/hubert/knn_ast_kd_nmt/-/commit/fe0c9048d44029390ddbd2a16352e476983f4d7a 
-It also contains code from the Nearest Neighbor Machine Translation repository (https://github.com/bpnayak/knnmt), which is a fork of fairseq, too, and uses the exact same license.
-The relevant code is added 
-From: https://gitlab.cl.uni-heidelberg.de/hubert/knn_ast_kd_nmt/-/commit/ebd988f4a1731e01cb7bf9f721d5c63a05147382
-To: https://gitlab.cl.uni-heidelberg.de/hubert/knn_ast_kd_nmt/-/commit/3218d4ffbe06a3cdb50229c7a4f468e20514b0f7
-
-===
