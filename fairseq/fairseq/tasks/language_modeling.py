@@ -102,7 +102,7 @@ class LanguageModelingConfig(FairseqDataclass):
     tpu: bool = II("common.tpu")
     use_plasma_view: bool = II("common.use_plasma_view")
     plasma_path: str = II("common.plasma_path")
-    ## knn related items
+    ## knn related items    - adaptation of old fairseq format used in https://github.com/urvashik/knnmt/blob/master/fairseq/tasks/language_modeling.py to new fairseq config
     knn_keytype: Optional[str] = field(
             default=None,
             metadata={"help": "use last_ffn_input"}
