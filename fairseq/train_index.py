@@ -1,3 +1,4 @@
+# taken from https://github.com/urvashik/knnmt/blob/master/train_index.py
 import argparse
 import os
 import numpy as np
