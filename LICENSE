@@ -1,5 +1,7 @@
+
 MIT License
 
+Copyright (c) Facebook, Inc. and its affiliates.
 Copyright (c) 2022 Rebekka Hubert
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -20,62 +22,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-
-
 ===
+
 
 This repository is foremost a fork of the Fairseq repository (https://github.com/facebookresearch/fairseq} from March, 2021, as uploaded in commit https://gitlab.cl.uni-heidelberg.de/hubert/knn_ast_kd_nmt/-/commit/fe0c9048d44029390ddbd2a16352e476983f4d7a 
-It also contains code from the Nearest Neighbor Machine Translation repository (https://github.com/bpnayak/knnmt), which is a fork of fairseq, too. 
-What follows below is the original license for fairseq (also given in a separate file in fairseq/LICENSE) and for the Nearest Neighbor Machine Translation repository.
-Fairseq:
-===
-
-MIT License
-
-Copyright (c) Facebook, Inc. and its affiliates.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+It also contains code from the Nearest Neighbor Machine Translation repository (https://github.com/bpnayak/knnmt), which is a fork of fairseq, too, and uses the exact same license.
+The relevant code is added 
+From: https://gitlab.cl.uni-heidelberg.de/hubert/knn_ast_kd_nmt/-/commit/ebd988f4a1731e01cb7bf9f721d5c63a05147382
+To: https://gitlab.cl.uni-heidelberg.de/hubert/knn_ast_kd_nmt/-/commit/3218d4ffbe06a3cdb50229c7a4f468e20514b0f7
 
 ===
-
-Nearest Neighbor Machine Translation:
-
-===
-
-MIT License
-
-Copyright (c) Facebook, Inc. and its affiliates.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
