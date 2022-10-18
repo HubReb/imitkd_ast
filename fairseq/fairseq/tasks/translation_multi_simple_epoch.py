@@ -72,7 +72,7 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                             action=FileContentsAction)
         parser.add_argument('--keep-inference-langtok', action='store_true',
                             help='keep language tokens in inference output (e.g. for analysis or debugging)')
-        ## knn related items
+        ## knn related items - taken from https://github.com/urvashik/knnmt/blob/master/fairseq/tasks/translation.py
         parser.add_argument('--knn-keytype', type=str, default=None,
                 help='use last_ffn_input')
         parser.add_argument('--probe', default=8, type=int,

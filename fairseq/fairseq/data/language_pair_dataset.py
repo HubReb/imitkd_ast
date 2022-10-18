@@ -428,8 +428,10 @@ class LanguagePairDataset(FairseqDataset):
         on this order."""
         if self.shuffle:
             indices = np.random.permutation(len(self)).astype(np.int64)
+            ### taken from https://github.com/urvashik/knnmt/blob/master/fairseq/data/language_pair_dataset.py
             if self.args and hasattr(self.args, "save_knn_subset") and self.args.save_knn_subset:
                 return indices
+            ###
         else:
             indices = np.arange(len(self), dtype=np.int64)
         if self.buckets is None:

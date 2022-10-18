@@ -47,7 +47,7 @@ class SpeechToTextTask(LegacyFairseqTask):
             metavar="N",
             help="max number of tokens in the target sequence",
         )
-        ## knn related items
+        ## knn related items - same parameters as defined in https://github.com/urvashik/knnmt/blob/master/fairseq/tasks/translation.py for the translation task
         parser.add_argument('--knn-keytype', type=str, default=None,
                             help='use last_ffn_input')
         parser.add_argument('--probe', default=8, type=int,
