@@ -24,8 +24,8 @@ SOFTWARE.
 
 ===
 
-This repository is foremost a fork of the Fairseq repository (https://github.com/facebookresearch/fairseq} from August, 2021, and also contains code from the Nearest Neighbor Machine Translation repository (https://github.com/bpnayak/knnmt), which is a fork of fairseq, too. 
-What follows below is the original license for fairseq (original file) and for the Nearest Neighbor Machine Translation repository.
+This repository is foremost a fork of the Fairseq repository (https://github.com/facebookresearch/fairseq} from March, 2021. It also contains code from the Nearest Neighbor Machine Translation repository (https://github.com/bpnayak/knnmt), which is a fork of fairseq, too. 
+What follows below is the original license for fairseq (also given in a separate file in fairseq/LICENSE) and for the Nearest Neighbor Machine Translation repository.
 Fairseq:
 ===
 
