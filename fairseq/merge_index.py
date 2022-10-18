@@ -1,3 +1,4 @@
+# slightly adapted from https://github.com/urvashik/knnmt/blob/master/merge_index.py
 import argparse
 import os
 import numpy as np
