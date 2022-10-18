@@ -288,7 +288,7 @@ class TransformerDecoderLayer(nn.Module):
         self_attn_padding_mask: Optional[torch.Tensor] = None,
         need_attn: bool = False,
         need_head_weights: bool = False,
-        ret_ffn_inp: bool = False,
+        ret_ffn_inp: bool = False,      # added as in https://github.com/urvashik/knnmt/blob/master/fairseq/modules/transformer_layer.py
     ):
         """
         Args:
@@ -392,9 +392,10 @@ class TransformerDecoderLayer(nn.Module):
         residual = x
         if self.normalize_before:
             x = self.final_layer_norm(x)
+        ### as in https://github.com/urvashik/knnmt/blob/master/fairseq/modules/transformer_layer.py
         if ret_ffn_inp:
             ffn_inp = x.clone()
-
+        ###
         x = self.activation_fn(self.fc1(x))
         x = self.activation_dropout_module(x)
         x = self.fc2(x)
@@ -414,8 +415,10 @@ class TransformerDecoderLayer(nn.Module):
             else:
                 self_attn_state = [saved_state["prev_key"], saved_state["prev_value"]]
             return x, attn, self_attn_state
+        ### as in https://github.com/urvashik/knnmt/blob/master/fairseq/modules/transformer_layer.py
         if ret_ffn_inp:
             return x, ((attn, ffn_inp)), None
+        ###
         return x, attn, None
 
     def make_generation_fast_(self, need_attn: bool = False, **kwargs):
