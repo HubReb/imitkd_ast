@@ -1,3 +1,4 @@
+# adapted from https://github.com/urvashik/knnmt/blob/master/master_script.py
 import argparse
 import itertools
 import os
