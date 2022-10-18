@@ -94,6 +94,8 @@ class SequenceScorer(object):
                 sample["target"] = orig_target
 
             probs = probs.view(sample["target"].shape)
+            ###
+            # taken from https://github.com/urvashik/knnmt/blob/master/fairseq/sequence_scorer.py
             if 'knn_dstore' in kwargs:
                 dstore = kwargs['knn_dstore']
                 # TxBxC
@@ -113,7 +115,7 @@ class SequenceScorer(object):
                 probs = combine_knn_and_vocab_probs(
                             yhat_knn_prob, probs, self.args.lmbda)
 
-
+            ###
             if avg_probs is None:
                 avg_probs = probs
             else:
@@ -160,6 +162,7 @@ class SequenceScorer(object):
                     alignment = None
             else:
                 avg_attn_i = alignment = None
+            # dstore_key, dstore_keys_mt taken from https://github.com/urvashik/knnmt/blob/master/fairseq/sequence_scorer.py
             hypos.append([{
                 'tokens': ref,
                 'score': score_i,
