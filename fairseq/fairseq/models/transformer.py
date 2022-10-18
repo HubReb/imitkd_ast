@@ -665,7 +665,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         )
         self.decoder_layerdrop = args.decoder_layerdrop
         self.share_input_output_embed = args.share_decoder_input_output_embed
-        self.knn_keytype = args.knn_keytype if hasattr(args, 'knn_keytype') else None
+        self.knn_keytype = args.knn_keytype if hasattr(args, 'knn_keytype') else None       # taken from https://github.com/urvashik/knnmt/blob/master/fairseq/models/transformer.py
 
         input_embed_dim = embed_tokens.embedding_dim
         embed_dim = args.decoder_embed_dim
@@ -943,11 +943,12 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                 self_attn_mask = self.buffered_future_mask(x)
             else:
                 self_attn_mask = None
+            ### taken from https://github.com/urvashik/knnmt/blob/master/fairseq/models/transformer.py
             if self.knn_keytype == 'last_ffn_input' and idx == (len(self.layers)-1):
                 get_ffn_inp = True
             else:
                 get_ffn_inp = False
-
+            ###
             x, layer_attn, _ = layer(
                 x,
                 enc,
@@ -960,12 +961,13 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                 ret_ffn_inp=get_ffn_inp,
             )
             inner_states.append(x)
+            ### taken from https://github.com/urvashik/knnmt/blob/master/fairseq/models/transformer.py
             if get_ffn_inp:
                 if layer_attn is None:
                     raise ValueError("Cannot use layerdrop with knnlm!")
                 knn_emb = layer_attn[1]
                 layer_attn = layer_attn[0]
- 
+            ###
             if layer_attn is not None and idx == alignment_layer:
                 attn = layer_attn.float().to(x)
 
@@ -978,18 +980,20 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 
         if self.layer_norm is not None:
             x = self.layer_norm(x)
+        ### taken from https://github.com/urvashik/knnmt/blob/master/fairseq/models/transformer.py
         if self.knn_keytype == 'out_after_layernorm':
             knn_emb = x.clone()
-
+        ###
 
         # T x B x C -> B x T x C
         x = x.transpose(0, 1)
 
         if self.project_out_dim is not None:
             x = self.project_out_dim(x)
+            ### taken from https://github.com/urvashik/knnmt/blob/master/fairseq/models/transformer.py
         if self.knn_keytype == 'last_ffn_input' or self.knn_keytype == 'out_after_layernorm':
             return x, {'attn': [attn], 'inner_states': inner_states, self.knn_keytype: knn_emb}
-
+        ###
         return x, {"attn": [attn], "inner_states": inner_states}
 
     def output_layer(self, features):
