@@ -230,7 +230,7 @@ def _main(cfg: DictConfig, output_file):
         if tokenizer is not None:
             x = tokenizer.decode(x)
         return x
-    ## knn saving code
+    ## knn saving code - taken from https://github.com/urvashik/knnmt/blob/master/fairseq_cli/generate.py
     if cfg.task.save_knn_dstore:
         print('keytype being saved:', cfg.task.knn_keytype)
         if cfg.task.knn_start > -1:
@@ -312,6 +312,7 @@ def _main(cfg: DictConfig, output_file):
         if "net_input" not in sample:
             continue
         ## For processing in parallel
+        ### taken from https://github.com/urvashik/knnmt/blob/master/fairseq_cli/generate.py
         if cfg.task.save_knn_dstore and to_skip > 0:
             num_samples = sample['target'].shape[0]
             if to_skip - num_samples > 0:
@@ -319,7 +320,7 @@ def _main(cfg: DictConfig, output_file):
                 target_tokens = utils.strip_pad(sample['target'], tgt_dict.pad()).int().cpu()
                 start_pos += len(target_tokens)
                 continue
-
+        ###
             for i, sample_id in enumerate(sample['id'].tolist()):
                 if to_skip > 0:
                     to_skip -= 1
@@ -368,6 +369,7 @@ def _main(cfg: DictConfig, output_file):
         )
         num_generated_tokens = sum(len(h[0]["tokens"]) for h in hypos)
         gen_timer.stop(num_generated_tokens)
+        ### taken from https://github.com/urvashik/knnmt/blob/master/fairseq_cli/generate.py
         if cfg.task.knn_add_to_idx:
             saving = sample['ntokens']
             if cfg.task.drop_lang_tok:
@@ -375,6 +377,7 @@ def _main(cfg: DictConfig, output_file):
             keys = np.zeros([saving, model.decoder.embed_dim], dtype=np.float32)
             addids = np.zeros([saving], dtype=np.int)
             save_idx = 0
+        ###
         source_texts = []
         for i, line in enumerate(source_text):
             if type(line) == list:
@@ -442,7 +445,7 @@ def _main(cfg: DictConfig, output_file):
                 target_tokens = (
                     utils.strip_pad(sample["target"][i, :], tgt_dict.pad()).int().cpu()
                 )
-            ## knn saving code
+            ## knn saving code - taken from https://github.com/urvashik/knnmt/blob/master/fairseq_cli/generate.py
             if cfg.task.save_knn_dstore:
                 hypo = hypos[i][0]
                 num_items = len(hypo['tokens'])
@@ -498,7 +501,7 @@ def _main(cfg: DictConfig, output_file):
             if cfg.generation.score_reference:
                 continue
 
-            ## error analysis knnmt: save knns, vals and probs
+            ## error analysis knnmt: save knns, vals and probs - taken from https://github.com/urvashik/knnmt/blob/master/fairseq_cli/generate.py
             if cfg.task.knnmt and cfg.task.save_knns:
                 to_save_objects.append(
                         {
@@ -645,7 +648,7 @@ def _main(cfg: DictConfig, output_file):
                         scorer.add_string(target_str, detok_hypo_str)
                     else:
                         scorer.add(target_tokens, hypo_tokens)
-
+            ### taken from https://github.com/urvashik/knnmt/blob/master/fairseq_cli/generate.py
             if cfg.task.knn_start > -1 and knn_num_samples_proc == cfg.knn_proc:
                 break
             if cfg.task.save_knn_subset and total_saved >= cfg.task.save_knn_subset_num:
@@ -665,7 +668,7 @@ def _main(cfg: DictConfig, output_file):
         #print(idx)
         #if idx == 0:
         #    break
-
+        ###
 
 
 
@@ -674,6 +677,7 @@ def _main(cfg: DictConfig, output_file):
         num_sentences += (
             sample["nsentences"] if "nsentences" in sample else sample["id"].numel()
         )
+    ### taken from https://github.com/urvashik/knnmt/blob/master/fairseq_cli/generate.py
     if cfg.task.knn_q2gpu:
         index_ivf.quantizer = quantizer
         del quantizer_gpu
@@ -701,7 +705,7 @@ def _main(cfg: DictConfig, output_file):
 
     if cfg.task.knnmt and cfg.task.save_knns:
         pickle.dump(to_save_objects, open(cfg.task.save_knns_filename, "wb"))
-
+    ###
  
     logger.info("NOTE: hypothesis and token scores are output in base 2")
     logger.info(
