@@ -338,7 +338,7 @@ def add_eval_lm_args(parser):
 
 def add_generation_args(parser):
     group = parser.add_argument_group("Generation")
-    # knnmt arguments
+    # knnmt arguments - taken from https://github.com/urvashik/knnmt/blob/master/fairseq/options.py
     group.add_argument('--knnmt', action='store_true',
                        help='use the k-nearest neighbors for machine translation')
     group.add_argument('--use-faiss-only', action='store_true',
