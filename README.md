@@ -9,7 +9,7 @@ Instead of an AST expert,  a trained Neural Machine Translation (NMT) model is u
 
 The implementation is entirely based the [fairseq framework](https://github.com/facebookresearch/fairseq), specifically on the [speech-to-text module](https://github.com/facebookresearch/fairseq/tree/main/examples/speech_to_text).
 For usage of the fairseq framework please see the [fairseq documentation](https://fairseq.readthedocs.io/en/latest/).
-
+At the moment, this repository also contains code from the [Nearest Neighbor Machine Translation](https://github.com/bpnayak/knnmt), though it is no longer in use.
 
 In order for ImitKD to work, several changes were made to the fairseq framework:
 * training loop was changed
@@ -221,4 +221,6 @@ Myle Ott, Sergey Edunov, Alexei Baevski, Angela Fan, Sam Gross, Nathan Ng, David
 Changhan Wang and Yun Tang and Xutai Ma and Anne Wu and Dmytro Okhonko and Juan Pino: [fairseq S2T: Fast Speech-to-Text Modeling with fairseq](https://aclanthology.org/2020.aacl-demo.6.pdf)
 
 Yuchen Liu, Hao Xiong, Zhongjun He, Jiajun Zhang, Hua Wu, Haifeng Wang, and Chengqing Zong: [End-to-end speech translation with knowledge distillation.](https://www.isca-speech.org/archive/pdfs/interspeech_2019/liu19d_interspeech.pdf)
+
+Khandelwal, Urvashi and Fan, Angela and Jurafsky, Dan and Zettlemoyer, Luke and Lewis, Mike: [Nearest Neighbor Machine Translation](https://arxiv.org/pdf/2010.00710.pdf). In International Conference on Learning Representations (ICLR) - 2021
 
