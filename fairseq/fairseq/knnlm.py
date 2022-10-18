@@ -1,3 +1,4 @@
+# taken from https://github.com/urvashik/knnmt/blob/master/fairseq/knnlm.py
 import torch
 import faiss
 import numpy as np
