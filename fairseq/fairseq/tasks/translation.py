@@ -263,7 +263,7 @@ class TranslationConfig(FairseqDataclass):
     eval_bleu_print_samples: bool = field(
         default=False, metadata={"help": "print sample generations during validation"}
     )
-    ## knn related items
+    ## knn related items - adapted parameters from https://github.com/urvashik/knnmt/blob/master/fairseq/tasks/translation.py to new fairseq config style
     knn_keytype: Optional[str] = field(
             default=None,
             metadata={"help": "use last_ffn_input"}
