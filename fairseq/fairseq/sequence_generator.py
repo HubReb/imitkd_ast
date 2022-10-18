@@ -16,6 +16,7 @@ from fairseq.data import data_utils
 from fairseq.models import FairseqIncrementalDecoder
 from torch import Tensor
 from fairseq.ngram_repeat_block import NGramRepeatBlock
+# knnmt parts were added following  https://github.com/urvashik/knnmt/blob/master/fairseq/sequence_generator.py
 from fairseq.knnlm import KNN_Dstore
 
 
