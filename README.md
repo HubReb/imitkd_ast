@@ -31,9 +31,11 @@ Simply create a new conda environment from the environment.yml by running:
 ```
 conda env create -f environment.yml
 ```
+Note that this process may take several minutes.
 Then activate the environment, change into the fairseq directory and install fairseq:
 
 ```
+conda activate train
 cd fairseq
 pip install .
 ```
@@ -86,6 +88,38 @@ fairseq-train ${COVOST_ROOT}/en --config-yaml config_st_en_de.yaml --train-subse
  ```
  
 __**Important**: Training such a model requires at least 40 GB of RAM and a GPU with at least 20 GB of VRAM, 48GB of VRAM are recommended.__
+
+### AggreVaTe 
+
+To use AggreVaTe , e. g. the above transformer or a ImitKD transformer, use:
+
+```
+fairseq-train ${COVOST_ROOT} \
+  --config-yaml config_test_wmt19.yaml --train-subset train_processed  --valid-subset dev_processed --finetune-from-model ${pre-trained_s2t_transformer} \
+  --save-dir ${ST_SAVE_DIR} --num-workers 8 --max-tokens 50000  --max-epoch 50 --update-freq 8\
+  --task speech_to_text --criterion  aggrevate --report-accuracy \
+  --arch s2t_transformer_s --optimizer adam --lr 1e-6 --lr-scheduler fixed  \
+ --expert ${EXPERT} --expert-vocab-tgt ${PATH_TO_EXPERT_MODEL_DICTIONARY} \
+  --seed 1 --clip-norm 10.0  --expert-vocab-src ${PATH_TO_EXPERT_MODEL_SRC_DICTIONARY} \
+ --expert-vocab-tgt ${PATH_TO_EXPERT_MODEL_SRC_DICTIONARY} --path  ${PATH_TO_EXPERT_MODEL_DIRECTORY} \
+  --save-dir ${ST_SAVE_DIR} --bpe-codes ${PATH_TO_BPE} \
+  --patience 10 --sample-action-prob 0.5  --best-checkpoint-metric bleu --maximize-best-checkpoint-metric --eval-bleu \
+  --eval-bleu-detok moses --eval-bleu-args '{"beam": 5, "max_len_a": 1.2, "max_len_b": 10}'  \
+ --tensorboard-logdir ${LOG_DIR} --log-file ${LOG_FILE}
+```
+
+In the above command, training is warm-started by loading a pre-trained model (`--finetune-from-model`). 
+Remove the flag to cold-start training.
+If cold-starting, it is strongly recommended to initialze the new model with a pre-trained ASR encoder with the `--load-pretrained-encoder-from` flag.
+Because the expert policy is not mixed in to generate the student's translations, training in this manner is not efficient.
+
+`--sample-action-prob` defines the probability with which a random uniform action is taken. Otherwise, the model's most probable action is taken.
+
+
+uniform random action is taken with probability 0.5. 
+Otherwise, the model's best action at timestep t is taken.
+The best model with respect to BLEU on the development set is taken.
+Omit ` --best-checkpoint-metric bleu --maximize-best-checkpoint-metric --eval-bleu --eval-bleu-detok moses --eval-bleu-args '{"beam": 5, "max_len_a": 1.2, "max_len_b": 10}'` to choose the best model with respect to NLL on the validation set.
 
 
 ## A note on replacing gold transcripts with generated transcripts
@@ -180,7 +214,7 @@ Simply run:
 conda env create -f environment.yml
 ```
 
-Create a file that list the logs created by running fairseq-generate (*important*: Do not run fairseq-generate with the --quiet flag. If you do, fairseq-generates only saves he detokenized BLEU score to the log file).
+Create a file that list the logs created by running fairseq-generate (*important*: Do not run fairseq-generate with the --quiet flag. If you do, fairseq-generates only saves the detokenized BLEU score to the log file).
 Write each file name to a new line, e.g.:
 
 ```
