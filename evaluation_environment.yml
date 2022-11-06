@@ -1,8 +1,7 @@
-name: eval
+name: eval2
 channels:
   - defaults
 dependencies:
   - sacrebleu
   - sacremoses
   - pandas
-prefix: /home/rebekka/anaconda3/envs/eval
