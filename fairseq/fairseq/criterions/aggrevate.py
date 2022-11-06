@@ -187,8 +187,8 @@ def get_loss_components(net_output, expert_reward_to_go, indices, current_reward
     rse = torch.stack(rse, dim=0)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     # BLEU values calculated by sacrebleu/BleuScorer are between 0 and 100
-    r_e = torch.tensor([bleu / 100 for bleu in expert_reward_to_go], device=device)
-    r_s_b = torch.tensor([bleu / 100 for bleu in current_reward], device=device)
+    r_e = torch.tensor([score / 100 for score in expert_reward_to_go], device=device)
+    r_s_b = torch.tensor([score / 100 for score in current_reward], device=device)
     indicator = [r_e > r_s_b][0]
     bleu_diff = r_e - r_s_b
     return rse, bleu_diff, indicator
@@ -366,7 +366,7 @@ class Aggrevate(FairseqCriterion):
         # ntokens = sum(log.get("ntokens", 0) for log in logging_outputs)
         sample_size = sum(log.get("sample_size", 0) for log in logging_outputs)
         bleu_diff = sum(log.get("bleu_diff", 0) for log in logging_outputs)
-        r_student = sum(log.get("r_student", 0) for log in logging_outputs)
+        student_log = sum(log.get("student_log", 0) for log in logging_outputs)
         indicator_sum = sum(log.get("indicator_sum", 0) for log in logging_outputs)
         metrics.log_scalar(
             "loss", loss_sum / sample_size / math.log(2), sample_size, round=3
@@ -379,7 +379,7 @@ class Aggrevate(FairseqCriterion):
                 "bleu_diff_no_zeros", bleu_diff / indicator_sum, sample_size, round=3
             )
         metrics.log_scalar(
-            "r_student", r_student / sample_size, sample_size, round=3
+            "student_log", student_log / sample_size, sample_size, round=3
         )
         metrics.log_scalar(
             "indicator_percentage", indicator_sum / sample_size, sample_size, round=3
@@ -454,7 +454,7 @@ class Aggrevate(FairseqCriterion):
         for i, hypo in enumerate(hypos):
             ref = utils.strip_pad(target[i, :], self.padding_idx).cpu()
 
-            ### more precise, but slow  - not happy with this###
+            ### slow  - not happy with this###
             # ref = self.tokenizer.decode(self.dict.string(utils.strip_pad(target[i, :], self.padding_idx).cpu(), unk_string="UNKNOWNTOKENINREF",
             #       bpe_symbol="fastBPE"))
             # only top scoring hypothesis is considered
@@ -504,7 +504,6 @@ class Aggrevate(FairseqCriterion):
                 indices.append(index)
                 hypos_in[i] = torch.cat((h[0]["tokens"][:index], eos_pad), dim=0)
             else:
-                print("wrong")
                 if self.expert_generate:
                     index = torch.distributions.Categorical(
                         probs=torch.tensor(
@@ -644,18 +643,17 @@ class Aggrevate(FairseqCriterion):
         )
         return expert_output
 
-    def calculate_rewards(self, sample, model, expert_output_samples, expert_input, indices, ats):
-        eos_pad = torch.tensor([self.dict.eos() for _ in range(expert_input.shape[0])], device=self.device).view(-1, 1)
-        sample["net_input"]["prev_output_tokens"] = torch.cat((eos_pad, expert_input), dim=1).to(self.device)
+    def calculate_rewards(self, sample, model, expert_output_samples, hypos_to_t, indices, ats):
+        eos_pad = torch.tensor([self.dict.eos() for _ in range(hypos_to_t.shape[0])], device=self.device).view(-1, 1)
+        sample["net_input"]["prev_output_tokens"] = torch.cat((eos_pad, hypos_to_t), dim=1).to(self.device)
         sample["net_input"].pop("src_text", None)
         targets = sample['target'].data.int()
         net_output = model(**sample["net_input"])
         # avoid rewriting calculate_bleu method
         student_hypos = [[{"tokens": utils.strip_pad(expert_input_sample, self.dict.pad())}] for expert_input_sample in
-                         expert_input.cpu()]
+                         hypos_to_t.cpu()]
         qt = self.calculate_bleu(targets, student_hypos)
         rtg = self.calculate_bleu(targets, expert_output_samples)
-        qts, bleu_diff, indicator = get_loss_components(net_output, rtg, indices,
-                                                               qt, ats)
+        qts, bleu_diff, indicator = get_loss_components(net_output, rtg, indices, qt, ats)
         return bleu_diff, qts, indicator
 
