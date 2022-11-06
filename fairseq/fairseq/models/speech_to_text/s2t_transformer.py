@@ -398,7 +398,7 @@ class TransformerDecoderScriptable(TransformerDecoder):
         if self.knn_keytype == 'last_ffn_input' or self.knn_keytype == 'out_after_layernorm':
             return x, attention_states_dictionary
 
-        return x, None
+        return x, attention_states_dictionary
 
 
 @register_model_architecture(model_name="s2t_transformer", arch_name="s2t_transformer")
