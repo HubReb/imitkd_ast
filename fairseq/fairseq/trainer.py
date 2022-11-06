@@ -945,7 +945,7 @@ class Trainer(object):
         metrics.log_stop_time("train_wall")
 
         try:
-            if self.criterion.beta:
+            if self.criterion.beta and self.cfg.optimization.max_update > 0:
                 t = self.get_num_updates()
                 # self.criterion.beta = 200 ** (-(t / self.cfg.optimization.max_update))
                 self.criterion.beta = 200 ** (-(t / self.cfg.optimization.max_update))
