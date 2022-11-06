@@ -195,6 +195,8 @@ class SpeechToTextTask(LegacyFairseqTask):
 
             elif "ImitKD" in str(type(criterion)):
                 loss, sample_size, logging_output = criterion(model, sample, valid=True)
+            elif "Aggrevate" in str(type(criterion)):
+                loss, sample_size, logging_output = criterion(model, sample, valid=True)
             else:
                 loss, sample_size, logging_output = criterion(model, sample)
         return loss, sample_size, logging_output
