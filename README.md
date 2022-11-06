@@ -104,7 +104,7 @@ fairseq-train ${COVOST_ROOT} \
  --expert-vocab-tgt ${PATH_TO_EXPERT_MODEL_SRC_DICTIONARY} --path  ${PATH_TO_EXPERT_MODEL_DIRECTORY} \
   --save-dir ${ST_SAVE_DIR} --bpe-codes ${PATH_TO_BPE} \
   --patience 10 --sample-action-prob 0.5  --best-checkpoint-metric bleu --maximize-best-checkpoint-metric --eval-bleu \
-  --eval-bleu-detok moses --eval-bleu-args '{"beam": 5, "max_len_a": 1.2, "max_len_b": 10}'  \
+  --eval-bleu-detok moses   \
  --tensorboard-logdir ${LOG_DIR} --log-file ${LOG_FILE}
 ```
 
@@ -119,7 +119,7 @@ Because the expert policy is not mixed in to generate the student's translations
 uniform random action is taken with probability 0.5. 
 Otherwise, the model's best action at timestep t is taken.
 The best model with respect to BLEU on the development set is taken.
-Omit ` --best-checkpoint-metric bleu --maximize-best-checkpoint-metric --eval-bleu --eval-bleu-detok moses --eval-bleu-args '{"beam": 5, "max_len_a": 1.2, "max_len_b": 10}'` to choose the best model with respect to NLL on the validation set.
+Omit ` --best-checkpoint-metric bleu --maximize-best-checkpoint-metric --eval-bleu --eval-bleu-detok moses` to choose the best model with respect to NLL on the validation set.
 
 
 ## A note on replacing gold transcripts with generated transcripts
