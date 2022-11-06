@@ -7,6 +7,7 @@ import math
 from typing import Dict, List, Optional
 import sys
 
+import numpy
 import numpy as np
 
 import torch
@@ -494,7 +495,6 @@ class SequenceGenerator(nn.Module):
                 eos_scores = torch.masked_select(
                     cand_scores[:, :beam_size], mask=eos_mask[:, :beam_size]
                 )
-
                 finalized_sents = self.finalize_hypos(
                     step,
                     eos_bbsz_idx,
@@ -511,6 +511,7 @@ class SequenceGenerator(nn.Module):
                     knns=knns if self.args and self.args.save_knns else None,
                     knn_vals=vals if self.args and self.args.save_knns else None,
                     knn_probs=probs if self.args and self.args.save_knns else None,
+                    #lprobs=lprobs.view(bsz, -1, self.vocab_size)[:, -1, :].detach().clone(),
                 )
                 ###
                 num_remaining_sent -= len(finalized_sents)
@@ -696,6 +697,7 @@ class SequenceGenerator(nn.Module):
         knns=None,
         knn_vals=None,
         knn_probs=None,
+        lprobs=None             # needed for aggrevate, shape (bsz, 1 ,vocab_size) -> last timestep
     ):
         """Finalize hypothesis, store finalized information in `finalized`, and change `finished` accordingly.
         A sentence is finalized when {beam_size} finished items have been collected for it.
@@ -791,6 +793,7 @@ class SequenceGenerator(nn.Module):
                         "knns": knns[i].cpu().numpy() if knnmt else None,
                         "vals": knn_vals[i].cpu().numpy() if knnmt else None,
                         "probs": knn_probs[i].cpu().numpy() if knnmt else None,
+                        "lprobs": lprobs[i].cpu() if isinstance(lprobs, torch.Tensor) else None
                     }
                 )
 
