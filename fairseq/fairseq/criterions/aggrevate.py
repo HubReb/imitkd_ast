@@ -15,6 +15,7 @@ import torch
 import fastBPE
 import numpy as np
 import sacrebleu
+from collections import namedtuple
 
 from fairseq import metrics, utils
 from fairseq.scoring import bleu
@@ -25,6 +26,7 @@ from fairseq.data import Dictionary
 from fairseq.sequence_generator import SequenceGenerator
 from fairseq.data import encoders
 from fairseq.criterions.helper_functions import collate_tokens
+
 
 @dataclass
 class AggrevateConfig(FairseqDataclass):
@@ -66,16 +68,17 @@ class AggrevateConfig(FairseqDataclass):
     )
     expert_generate: bool = field(
         default=False,
-        metadata={"help": "whether to take expert's hypothesis or take dataset as expert demonstrations"},
+        metadata={
+            "help": "whether to take expert's hypothesis or take dataset as expert demonstrations - ONLY accessed if data-mix flag is set"},
     )
-    no_data_mix: bool = field(
+    data_mix: bool = field(
         default=False,
-        metadata={"help": "whether to use only student hypotheses instead of relying on a expert/student data mixture"}
+        metadata={
+            "help": "whether to create a expert/student data mixture instead of only generating from the student"}
     )
     sample_action_prob: float = field(
         default=0.1,
-        metadata={"help": "probability of either sampling the action uniformly (best-or-uniform) or taking the "
-                          "expert's optimal action (best-or-expert)"}
+        metadata={"help": "probability of either sampling the action uniformly - set to 1 to only draw random samples"}
     )
     eval_bleu: bool = field(
         default=False,
@@ -95,12 +98,13 @@ class AggrevateConfig(FairseqDataclass):
         default="space",
         metadata={
             "help": "detokenize before computing BLEU (e.g., 'moses'); required if using --eval-bleu; "
-            "use 'space' to disable detokenization; see fairseq.data.encoders for other options"
+                    "use 'space' to disable detokenization; see fairseq.data.encoders for other options"
         },
     )
 
 
-def valid_loss(lprobs, target, sample, model, tgt_dict, eval_bleu=False, ignore_index=None, reduce=True, tokenizer=None):
+def valid_loss(lprobs, target, sample, model, tgt_dict, eval_bleu=False, ignore_index=None, reduce=True,
+               tokenizer=None):
     if target.dim() == lprobs.dim() - 1:
         target = target.unsqueeze(-1)
     nll_loss = -lprobs.gather(dim=-1, index=target)
@@ -161,33 +165,30 @@ def inference_with_bleu(generator, sample, model, tgt_dict, tokenizer=None):
     return sacrebleu.corpus_bleu(hyps, [refs], tokenize="none")
 
 
-def knn_forced_loss(bleu_diff, rs_student, indicator):
-    #  reshaping unneeded, but makes debugging easier
+def loss_calculation(bleu_diff, rs_student, indicator):
+    #  reshaping unneeded, but made debugging easier
     rs_student = rs_student.view(-1, 1)
     bleu_diff = bleu_diff.view(-1, 1)
     indicator = indicator.view(-1, 1)
     loss = (indicator * (rs_student - bleu_diff) ** 2).sum()
-    #print(bleu_diff.flatten(), rs_student.flatten())
-    # print(reward_expert.sum(), reward_student.sum())
     return loss, bleu_diff.sum(), rs_student.sum(), indicator.sum()
 
 
-def get_action_probs_and_rewards(net_output, expert_reward_to_go, indices, current_reward, ats):
+def get_loss_components(net_output, expert_reward_to_go, indices, current_reward, ats):
     rse = []
     for i, tensor in enumerate(net_output[0]):
-        # why 8? -> https://math.stackexchange.com/questions/4242042/stretch-sigmoid-along-horizontal-x-interval
+        # why 8? -> works better
         max_value = torch.max(tensor[indices[i]])
         min_value = torch.min(tensor[indices[i]])
-        scaled_tensor = 1 / (1 + torch.exp(-8 * (2 * tensor[indices[i], ats[i]] - abs(min_value + max_value)) / abs(min_value - max_value)))
-        #scaled_tensor_method2 = torch.sigmoid(
-         #   8*(tensor[indices[i], ats[i]] - (min_value + abs(min_value - max_value) / 2)) /
-          #  abs(min_value - max_value)
-        #)
-        #print(scaled_tensor, scaled_tensor_method2)
+        scaled_tensor = 1 / (1 + torch.exp(
+            -8 * (2 * tensor[indices[i], ats[i]] - abs(min_value + max_value)) / abs(min_value - max_value)))
+        # might go back to torch.sigmoid() and scaling input
         rse.append(scaled_tensor)
     rse = torch.stack(rse, dim=0)
-    r_e = torch.tensor([bleu / 100 for bleu in expert_reward_to_go], device="cuda")
-    r_s_b = torch.tensor([bleu / 100 for bleu in current_reward], device="cuda")
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    # BLEU values calculated by sacrebleu/BleuScorer are between 0 and 100
+    r_e = torch.tensor([bleu / 100 for bleu in expert_reward_to_go], device=device)
+    r_s_b = torch.tensor([bleu / 100 for bleu in current_reward], device=device)
     indicator = [r_e > r_s_b][0]
     bleu_diff = r_e - r_s_b
     return rse, bleu_diff, indicator
@@ -208,7 +209,7 @@ class Aggrevate(FairseqCriterion):
             beta,
             expert_action_chosen,
             expert_generate,
-            no_data_mix,
+            data_mix,
             sample_action_prob,
             eval_bleu,
             eval_bleu_args,
@@ -229,30 +230,42 @@ class Aggrevate(FairseqCriterion):
         self.eos = self.dict.eos()
         self.bpe = fastBPE.fastBPE(bpe_codes, expert_vocab_tgt)
         self.sentence_avg = True
-        self._scorer = BleuScorer(self.padding_idx, self.eos, self.dict.unk())
         self.beta = beta
         self.expert_action_chosen = expert_action_chosen
         self.eval_bleu = eval_bleu
         self.eval_bleu_args = eval_bleu_args
         self.eval_bleu_detok_args = eval_bleu_detok_args
-        if  self.expert_action_chosen:
+        if self.expert_action_chosen:
             self.uniform_sampling = False
         else:
             self.uniform_sampling = True
+            assert sample_action_prob > 0
         if not self.expert_action_chosen:
             self.random_action_distribution = torch.distributions.Categorical(
-                probs=torch.tensor([1.0 for a in self.dict.indices.values() if a != self.dict.pad() and a!= self.dict.eos() and a != self.dict.unk()])
+                probs=torch.tensor([1.0 for a in self.dict.indices.values() if
+                                    a != self.dict.pad() and a != self.dict.eos() and a != self.dict.unk()])
             )
         self.gen = np.random.default_rng()
         self.expert_generate = expert_generate
-        self.data_mix = no_data_mix
+        self.data_mix = data_mix
         self.sample_action_prob = sample_action_prob
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        # include translation task attributes here to calculate BLEU on validation set
         self.eval_bleu_detok = eval_bleu_detok
         if self.eval_bleu:
             detok_args = json.loads(self.eval_bleu_detok_args)
             self.tokenizer = encoders.build_tokenizer(
                 Namespace(tokenizer=self.eval_bleu_detok, **detok_args)
             )
+        # adapted from https://github.com/jwieting/beyond-bleu/blob/master/fairseq/criterions/fairseq_sequence_criterion.py
+        scorer_config = namedtuple('scorer_config', ['pad', 'eos', 'unk'])  # variable name change for easier reading
+        cfg = scorer_config(self.padding_idx, self.eos, self.dict.unk())
+        self._scorer = bleu.Scorer(cfg)
+
+    def score(self, ref, hypo):
+        self._scorer.reset(one_init=True)
+        self._scorer.add(ref, hypo)
+        return self._scorer.score()
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
@@ -273,7 +286,8 @@ class Aggrevate(FairseqCriterion):
         if valid:
             loss, logged_bleu = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
         else:
-            loss, bleu_diff, r_student, indicator_sum = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
+            loss, bleu_diff, student_log, indicator_sum = self.compute_loss(model, net_output, sample, reduce=reduce,
+                                                                          valid=valid)
         sample_size = (
             sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
         )
@@ -289,7 +303,7 @@ class Aggrevate(FairseqCriterion):
             logging_output = {
                 "loss": loss.data,
                 "bleu_diff": bleu_diff.data,
-                "r_student": r_student.data,
+                "student_log": student_log.data,
                 "ntokens": sample["ntokens"],
                 "nsentences": sample["target"].size(0),
                 "sample_size": sample_size,
@@ -317,7 +331,6 @@ class Aggrevate(FairseqCriterion):
         if valid:
             sample["net_input"].pop("src_text", None)
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
-            sample["net_input"].pop("src_text", None)
             loss, logged_bleu = valid_loss(lprobs, target, sample, model, self.expert_vocab_tgt, self.eval_bleu,
                                            self.ignore_prefix_size, reduce=reduce, tokenizer=self.tokenizer)
             return loss, logged_bleu
@@ -327,13 +340,13 @@ class Aggrevate(FairseqCriterion):
                 expert_input, indices, ats = self.get_student_predictions_and_pass_to_expert(model, sample, source_text)
                 expert_output_samples = self.get_expert_output(sample, source_text, expert_input)
             model.train()  # call to SequenceGenerator sets model to eval mode, set model back to train
-            bleu_diff, rs_student, indicator = self.calculate_reward_and_reward_to_go(sample, model,
-                                                                                      expert_output_samples,
-                                                                                      expert_input, indices, ats)
-            loss, r_expert, r_student, indicator = knn_forced_loss(
-                bleu_diff, rs_student, indicator
+            bleu_diff, student_log, indicator = self.calculate_rewards(sample, model,
+                                                                      expert_output_samples,
+                                                                      expert_input, indices, ats)
+            loss, bleu_diff_log, student_log, indicator = loss_calculation(
+                bleu_diff, student_log, indicator
             )
-        return loss, r_expert, r_student, indicator
+        return loss, bleu_diff_log, student_log, indicator
 
     def compute_accuracy(self, model, net_output, sample):
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
@@ -410,7 +423,6 @@ class Aggrevate(FairseqCriterion):
 
                 def compute_bleu(meters):
                     import inspect
-                    import sacrebleu
 
                     fn_sig = inspect.getfullargspec(sacrebleu.compute_bleu)[0]
                     if "smooth_method" in fn_sig:
@@ -437,20 +449,22 @@ class Aggrevate(FairseqCriterion):
         """
         return True
 
-
     def calculate_bleu(self, target, hypos):
         bleu_scores = []
         for i, hypo in enumerate(hypos):
             ref = utils.strip_pad(target[i, :], self.padding_idx).cpu()
-            #ref = self.tokenizer.decode(self.dict.string(utils.strip_pad(target[i, :], self.padding_idx).cpu(), unk_string="UNKNOWNTOKENINREF",
-             #       bpe_symbol="fastBPE"))
+
+            ### more precise, but slow  - not happy with this###
+            # ref = self.tokenizer.decode(self.dict.string(utils.strip_pad(target[i, :], self.padding_idx).cpu(), unk_string="UNKNOWNTOKENINREF",
+            #       bpe_symbol="fastBPE"))
             # only top scoring hypothesis is considered
-           # hyp = self.tokenizer.decode(self.dict.string(hypo[0]["tokens"].int().cpu(), unk_string="UNKNOWNTOKENINHYP", bpe_symbol="fastBPE"))
-            # not happy with this - corpus-level metric on sentence-level - try chRF?
-            #bleu = sacrebleu.sentence_bleu(hyp, [ref], smooth_method="floor", smooth_value=0.1)     # not smoothing sets BLEU too low, smoothing exp. sets it far too high
-            #self._scorer.score(utils.strip_pad(target[i, :], self.padding_idx).cpu()  , hypo[0]['tokens'].int().cpu(), order=self.bleu_ngramms)
-            bleu_scores.append(self._scorer.score(ref, hypo[0]['tokens'].int().cpu())) # decreases training time by ca. 1/3, not as precise but works just as good -> useful despite drawbacks
-            #bleu_scores.append(bleu.score)
+            # hyp = self.tokenizer.decode(self.dict.string(hypo[0]["tokens"].int().cpu(), unk_string="UNKNOWNTOKENINHYP", bpe_symbol="fastBPE"))
+            # bleu = sacrebleu.sentence_bleu(hyp, [ref], smooth_method="floor", smooth_value=0.1)     # not smoothing sets BLEU too low, smoothing exp. sets it far too high
+            # self._scorer.score(utils.strip_pad(target[i, :], self.padding_idx).cpu()  , hypo[0]['tokens'].int().cpu(), order=self.bleu_ngramms)
+
+            ### decreases training time by ca. 1/3, not as precise but works just as good -> useful despite drawbacks ###
+            bleu_scores.append(self.score(ref, hypo[0]['tokens'].int().cpu()))
+            # bleu_scores.append(bleu.score)
         return bleu_scores
 
     def get_student_predictions_and_pass_to_expert(self, model, sample, source_text):
@@ -459,96 +473,105 @@ class Aggrevate(FairseqCriterion):
         student_sample["net_input"].pop("src_text", None)
         hypos_in = sample["target"].data.tolist()
         max_length = max([len(i) for i in hypos_in])  # avoid OOM
-        self.beta = 0.005
-        with torch.no_grad():
-            if self.data_mix:
-                expert_generator = SequenceGenerator([self.expert], self.dict, beam_size=1, max_len=max_length)
-                expert_generator.cuda()
-                dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
-                data_replacement_samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
+        if self.data_mix:
+            expert_generator = SequenceGenerator([self.expert], self.dict, beam_size=1, max_len=max_length)
+            expert_generator.to(self.device)
+            dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
+            data_replacement_samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
+            if self.expert_generate:
+                expert_sample = copy.deepcopy(sample)
+                expert_sample["net_input"]["src_tokens"] = source_text.to(self.device)
+                expert_sample["net_input"].pop("src_text", None)
+                expert_hypos = expert_generator._generate(expert_sample)
+            else:
+                expert_hypos = sample["target"]
+        else:
+            data_replacement_samp_mask = [True for _ in sample["net_input"]["prev_output_tokens"]]
+        student_generator = SequenceGenerator([model], self.dict, beam_size=1, max_len=max_length)
+        if self.uniform_sampling:
+            dist = Categorical(torch.tensor([1 - self.sample_action_prob, self.sample_action_prob]))
+            action_sampling_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
+        else:
+            action_sampling_mask = [False for _ in sample["net_input"]["prev_output_tokens"]]
+        student_generator.to(self.device)
+        hypos = student_generator._generate(student_sample)
+        indices = []
+        eos_pad = torch.tensor([self.eos], device=self.device)
+        for i, h in enumerate(hypos):
+            if data_replacement_samp_mask[i]:
+                index = torch.distributions.Categorical(
+                    probs=torch.tensor([1.0 for _ in range(h[0]["tokens"].shape[0])])).sample().to(self.device)
+                indices.append(index)
+                hypos_in[i] = torch.cat((h[0]["tokens"][:index], eos_pad), dim=0)
+            else:
+                print("wrong")
                 if self.expert_generate:
-                    expert_sample = copy.deepcopy(sample)
-                    expert_sample["net_input"]["src_tokens"] = source_text.cuda()
-                    expert_sample["net_input"].pop("src_text", None)
-                    expert_hypos = expert_generator._generate(expert_sample)
-                else:
-                    expert_hypos = sample["target"]
-            else:
-                data_replacement_samp_mask = [True for _ in sample["net_input"]["prev_output_tokens"]]
-            student_generator = SequenceGenerator([model], self.dict, beam_size=1, max_len=max_length)
-            if self.uniform_sampling:
-                dist = Categorical(torch.tensor([1 - self.sample_action_prob, self.sample_action_prob]))
-                action_sampling_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
-            student_generator.cuda()
-            hypos = student_generator._generate(student_sample)
-            indices = []
-            eos_pad = torch.tensor([self.eos], device="cuda")
-            for i, h in enumerate(hypos):
-                if data_replacement_samp_mask[i]:
-                    index = torch.distributions.Categorical(probs=torch.tensor([1.0 for _ in range(h[0]["tokens"].shape[0])])).sample().cuda()
+                    index = torch.distributions.Categorical(
+                        probs=torch.tensor(
+                            [1.0 for _ in range(expert_hypos[i][0]["tokens"].shape[0])])
+                    ).sample().to(self.device)
                     indices.append(index)
-                    hypos_in[i] = torch.cat((h[0]["tokens"][:index], eos_pad), dim=0)
+                    hypos_in[i] = torch.cat((expert_hypos[i][0]["tokens"][:index], eos_pad), dim=0)
                 else:
-                    if self.expert_generate:
-                        index = torch.distributions.Categorical(
-                            probs=torch.tensor([1.0 for _ in range(expert_hypos[i][0]["tokens"].shape[0])])).sample().cuda()
-                        indices.append(index)
-                        hypos_in[i] = torch.cat((expert_hypos[i][0]["tokens"][:index], eos_pad), dim=0)
-                    else:
-                        index = torch.distributions.Categorical(
-                            probs=torch.tensor([1.0 for _ in range((hypos_in[i][0]["tokens"].shape[0]))])
-                        ).sample().cuda()
-                        indices.append(index)
-                        hypos_in[i] = torch.cat((utils.strip_pad(torch.tensor(hypos_in[i], device="cuda"), self.padding_idx)[:index]), dim=0)
-            hypos_up_to_t = collate_tokens(
-                hypos_in,
-                self.expert_vocab_src.pad(),
-                self.expert_vocab_src.eos(),
-                left_pad=False,
-                move_eos_to_beginning=True
-            )
+                    index = torch.distributions.Categorical(
+                        probs=torch.tensor([1.0 for _ in range((hypos_in[i][0]["tokens"].shape[0]))])
+                    ).sample().to(self.device)
+                    indices.append(index)
+                    hypos_in[i] = torch.cat(
+                        (utils.strip_pad(torch.tensor(hypos_in[i], device=self.device), self.padding_idx)[:index],
+                         eos_pad),
+                        dim=0
+                    )
+        hypos_up_to_t = collate_tokens(
+            hypos_in,
+            self.expert_vocab_src.pad(),
+            self.expert_vocab_src.eos(),
+            left_pad=False,
+            move_eos_to_beginning=True
+        )
 
-            if self.expert_action_chosen:
-                out = {
-                    "id": sample["id"],
-                    "net_input": {
-                        "src_tokens": source_text.cuda(),
-                        "src_lengths": [len(text) for text in source_text],
-                        "prev_output_tokens": hypos_up_to_t.cuda(),
-                    },
-                    "target": sample["target"],
-                    "target_lengths": sample["target_lengths"],
-                    "ntokens": sample["ntokens"],
-                    "nsentences": sample["nsentences"],
-                }
-                expert_output = self.expert.get_normalized_probs(self.expert(**out["net_input"]),
-                                                                 log_probs=True).argmax(dim=-1)
-            else:
-                student_sample["net_input"]["prev_output_tokens"] = hypos_up_to_t.cuda()
+        if self.expert_action_chosen:
+            out = {
+                "id": sample["id"],
+                "net_input": {
+                    "src_tokens": source_text.to(self.device),
+                    "src_lengths": [len(text) for text in source_text],
+                    "prev_output_tokens": hypos_up_to_t.to(self.device)(),
+                },
+                "target": sample["target"],
+                "target_lengths": sample["target_lengths"],
+                "ntokens": sample["ntokens"],
+                "nsentences": sample["nsentences"],
+            }
+            expert_output = self.expert.get_normalized_probs(self.expert(**out["net_input"]),
+                                                             log_probs=True).argmax(dim=-1)
+        else:
+            if self.sample_action_prob < 1:
+                student_sample["net_input"]["prev_output_tokens"] = hypos_up_to_t.to(self.device)
                 model_output = model.get_normalized_probs(model(**student_sample["net_input"]), log_probs=True).argmax(
                     dim=-1)
-            ats = []
-            for i, hypo in enumerate(hypos_in):
-                if action_sampling_mask[i]:
-                    a_t = self.random_action_distribution.sample().cuda()
-                elif self.expert_action_chosen:
-                    a_t = expert_output[i][indices[i]]
-                else:
-                    a_t = model_output[i][indices[i]]
-                if not isinstance(hypo, torch.Tensor):
-                    hypo = torch.tensor(hypo, device="cuda")
-                if hypo.shape[0] > 1:
-                    hypo_including_t.append(torch.cat((hypo[:-1], a_t.unsqueeze(dim=0)), dim=0))
-                else:       # one element tensor
-                    hypo_including_t.append(torch.cat((hypo, a_t.unsqueeze(dim=0)), dim=0))
-                ats.append(a_t)
-            hypos_to_t = collate_tokens(
-                hypo_including_t,
-                self.expert_vocab_src.pad(),
-                self.expert_vocab_src.eos(),
-                left_pad=False,
-                move_eos_to_beginning=False
-            )
+        ats = []
+        for i, hypo in enumerate(hypos_in):
+            if action_sampling_mask[i]:
+                a_t = self.random_action_distribution.sample().to(self.device)
+            elif self.expert_action_chosen:
+                a_t = expert_output[i][indices[i]]
+            else:
+                a_t = model_output[i][indices[i]]
+            if not isinstance(hypo, torch.Tensor):
+                hypo = torch.tensor(hypo, device=self.device)
+            if hypo.shape[0] > 1:
+                hypo_including_t.append(torch.cat((hypo[:-1], a_t.unsqueeze(dim=0)), dim=0))
+            else:  # one element tensor
+                hypo_including_t.append(torch.cat((hypo, a_t.unsqueeze(dim=0)), dim=0))
+            ats.append(a_t)
+        hypos_to_t = collate_tokens(
+            hypo_including_t,
+            self.expert_vocab_src.pad(),
+            self.expert_vocab_src.eos(),
+            left_pad=False,
+            move_eos_to_beginning=False
+        )
         return hypos_to_t, indices, ats
 
     def transform_source_tokens_into_expert_voc(
@@ -598,7 +621,7 @@ class Aggrevate(FairseqCriterion):
             out = {
                 "id": sample["id"],
                 "net_input": {
-                    "src_tokens": source_texts.cuda(),
+                    "src_tokens": source_texts.to(self.device),
                     "src_lengths": [len(text) for text in source_texts],
                     "prev_output_tokens": [],
                 },
@@ -617,36 +640,22 @@ class Aggrevate(FairseqCriterion):
         expert_output = expert_generator.generate(
             [self.expert],
             out,
-            prefix_tokens=expert_input.cuda()
+            prefix_tokens=expert_input.to(self.device)
         )
         return expert_output
 
-    def calculate_reward_and_reward_to_go(self, sample, model, expert_output_samples, expert_input, indices, ats):
-        eos_pad = torch.tensor([self.dict.eos() for _ in range(expert_input.shape[0])], device="cuda").view(-1, 1)
-        sample["net_input"]["prev_output_tokens"] = torch.cat((eos_pad, expert_input), dim=1).cuda()
+    def calculate_rewards(self, sample, model, expert_output_samples, expert_input, indices, ats):
+        eos_pad = torch.tensor([self.dict.eos() for _ in range(expert_input.shape[0])], device=self.device).view(-1, 1)
+        sample["net_input"]["prev_output_tokens"] = torch.cat((eos_pad, expert_input), dim=1).to(self.device)
         sample["net_input"].pop("src_text", None)
         targets = sample['target'].data.int()
         net_output = model(**sample["net_input"])
-        # ugly hack to avoid rewriting calculate_bleu method TODO: rewrite method and delete ugly hack
-        student_hypos = [[{"tokens": utils.strip_pad(expert_input_sample, self.dict.pad())}] for expert_input_sample in expert_input.cpu()]
-        r_at_t = self.calculate_bleu(targets, student_hypos)
+        # avoid rewriting calculate_bleu method
+        student_hypos = [[{"tokens": utils.strip_pad(expert_input_sample, self.dict.pad())}] for expert_input_sample in
+                         expert_input.cpu()]
+        qt = self.calculate_bleu(targets, student_hypos)
         rtg = self.calculate_bleu(targets, expert_output_samples)
-        rs_student, bleu_diff, indicator = get_action_probs_and_rewards(net_output, rtg, indices,
-                                                                        r_at_t, ats)
-        return bleu_diff, rs_student, indicator
+        qts, bleu_diff, indicator = get_loss_components(net_output, rtg, indices,
+                                                               qt, ats)
+        return bleu_diff, qts, indicator
 
-
-# adapted from https://github.com/jwieting/beyond-bleu/blob/master/fairseq/criterions/fairseq_sequence_criterion.py
-class BleuScorer(object):
-
-    def __init__(self, pad, eos, unk):
-        from collections import namedtuple
-        cfg_f = namedtuple('cfg_f', ['pad', 'eos', 'unk'])
-        cfg = cfg_f(pad, eos, unk)
-        self._scorer = bleu.Scorer(cfg)
-
-
-    def score(self, ref, hypo):
-        self._scorer.reset(one_init=True)
-        self._scorer.add(ref, hypo)
-        return self._scorer.score()
