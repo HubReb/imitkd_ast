@@ -42,10 +42,7 @@ class AggrevateConfig(FairseqDataclass):
         default=0,
         metadata={"help": "Ignore first N tokens"},
     )
-    beta: int = field(
-        default=1,
-        metadata={"help": "replacement prop"},
-    )
+
     expert_vocab_tgt: str = field(
         default="wmt19.en-de.joined-dict.ensemble/dict.de.txt",
         metadata={"help": "vocab for nmt model output"},
@@ -66,16 +63,6 @@ class AggrevateConfig(FairseqDataclass):
         default="/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/fairseq/examples/speech_to_text/bpecodes",
         metadata={"help": "expert's bpe codes"},
     )
-    expert_generate: bool = field(
-        default=False,
-        metadata={
-            "help": "whether to take expert's hypothesis or take dataset as expert demonstrations - ONLY accessed if data-mix flag is set"},
-    )
-    data_mix: bool = field(
-        default=False,
-        metadata={
-            "help": "whether to create a expert/student data mixture instead of only generating from the student"}
-    )
     sample_action_prob: float = field(
         default=0.1,
         metadata={"help": "probability of either sampling the action uniformly - set to 1 to only draw random samples"}
@@ -83,16 +70,6 @@ class AggrevateConfig(FairseqDataclass):
     eval_bleu: bool = field(
         default=False,
         metadata={"help": "hack - pass flag if best checkpoint metric is bleu to compute BLEU score"}
-    )
-    eval_bleu_args: str = field(
-        default="{}",
-        metadata={
-            "help": 'generation args for BLUE scoring, e.g., \'{"beam": 4, "lenpen": 0.6}\', as JSON string'
-        },
-    )
-    eval_bleu_detok_args: str = field(
-        default="{}",
-        metadata={"help": "args for building the tokenizer, if needed, as JSON string"},
     )
     eval_bleu_detok: str = field(
         default="space",
@@ -120,7 +97,7 @@ def valid_loss(lprobs, target, sample, model, tgt_dict, eval_bleu=False, ignore_
     if eval_bleu:
         EVAL_BLEU_ORDER = 4
         logging_output = {}
-        sequence_generator = SequenceGenerator([model], tgt_dict, beam_size=1)
+        sequence_generator = SequenceGenerator([model], tgt_dict, beam_size=5)
         bleu = inference_with_bleu(sequence_generator, sample, model, tgt_dict, tokenizer)
         logging_output["_bleu_sys_len"] = bleu.sys_len
         logging_output["_bleu_ref_len"] = bleu.ref_len
@@ -206,14 +183,9 @@ class Aggrevate(FairseqCriterion):
             expert_vocab_tgt,
             path,
             bpe_codes,
-            beta,
             expert_action_chosen,
-            expert_generate,
-            data_mix,
             sample_action_prob,
             eval_bleu,
-            eval_bleu_args,
-            eval_bleu_detok_args,
             eval_bleu_detok,
             ignore_prefix_size=0,
             report_accuracy=False,
@@ -230,11 +202,8 @@ class Aggrevate(FairseqCriterion):
         self.eos = self.dict.eos()
         self.bpe = fastBPE.fastBPE(bpe_codes, expert_vocab_tgt)
         self.sentence_avg = True
-        self.beta = beta
         self.expert_action_chosen = expert_action_chosen
         self.eval_bleu = eval_bleu
-        self.eval_bleu_args = eval_bleu_args
-        self.eval_bleu_detok_args = eval_bleu_detok_args
         if self.expert_action_chosen:
             self.uniform_sampling = False
         else:
@@ -245,17 +214,12 @@ class Aggrevate(FairseqCriterion):
                 probs=torch.tensor([1.0 for a in self.dict.indices.values() if
                                     a != self.dict.pad() and a != self.dict.eos() and a != self.dict.unk()])
             )
-        self.gen = np.random.default_rng()
-        self.expert_generate = expert_generate
-        self.data_mix = data_mix
         self.sample_action_prob = sample_action_prob
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         # include translation task attributes here to calculate BLEU on validation set
-        self.eval_bleu_detok = eval_bleu_detok
         if self.eval_bleu:
-            detok_args = json.loads(self.eval_bleu_detok_args)
             self.tokenizer = encoders.build_tokenizer(
-                Namespace(tokenizer=self.eval_bleu_detok, **detok_args)
+                Namespace(tokenizer=eval_bleu_detok)
             )
         # idea adapted from https://github.com/jwieting/beyond-bleu/blob/master/fairseq/criterions/fairseq_sequence_criterion.py
         scorer_config = namedtuple('scorer_config', ['pad', 'eos', 'unk'])  # variable name change for easier reading
@@ -278,6 +242,9 @@ class Aggrevate(FairseqCriterion):
         sample_s = copy.deepcopy(sample)
         sample_s["net_input"].pop("src_text", None)
         net_output = model(**sample_s["net_input"])
+        sample_size = (
+            sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
+        )
         # doesn't occur in translation task: that has its own valid step - this hacks into fairseq valid step of speech2text
         # instead
         # otherwise valid includes running the entire loss step, including generating hypos, continuing hypos, etc...
@@ -285,13 +252,6 @@ class Aggrevate(FairseqCriterion):
         # -> hack2 to avoid breaking hack1
         if valid:
             loss, logged_bleu = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
-        else:
-            loss, bleu_diff, student_log, indicator_sum = self.compute_loss(model, net_output, sample, reduce=reduce,
-                                                                          valid=valid)
-        sample_size = (
-            sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
-        )
-        if valid:
             logging_output = {
                 "loss": loss.data,
                 "ntokens": sample["ntokens"],
@@ -300,6 +260,8 @@ class Aggrevate(FairseqCriterion):
                 "bleu": logged_bleu
             }
         else:
+            loss, bleu_diff, student_log, indicator_sum = self.compute_loss(model, net_output, sample, reduce=reduce,
+                                                                          valid=valid)
             logging_output = {
                 "loss": loss.data,
                 "bleu_diff": bleu_diff.data,
@@ -473,20 +435,6 @@ class Aggrevate(FairseqCriterion):
         student_sample["net_input"].pop("src_text", None)
         hypos_in = sample["target"].data.tolist()
         max_length = max([len(i) for i in hypos_in])  # avoid OOM
-        if self.data_mix:
-            expert_generator = SequenceGenerator([self.expert], self.dict, beam_size=1, max_len=max_length)
-            expert_generator.to(self.device)
-            dist = Categorical(torch.tensor([self.beta, 1 - self.beta]))
-            data_replacement_samp_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
-            if self.expert_generate:
-                expert_sample = copy.deepcopy(sample)
-                expert_sample["net_input"]["src_tokens"] = source_text.to(self.device)
-                expert_sample["net_input"].pop("src_text", None)
-                expert_hypos = expert_generator._generate(expert_sample)
-            else:
-                expert_hypos = sample["target"]
-        else:
-            data_replacement_samp_mask = [True for _ in sample["net_input"]["prev_output_tokens"]]
         student_generator = SequenceGenerator([model], self.dict, beam_size=1, max_len=max_length)
         if self.uniform_sampling:
             dist = Categorical(torch.tensor([1 - self.sample_action_prob, self.sample_action_prob]))
@@ -498,29 +446,10 @@ class Aggrevate(FairseqCriterion):
         indices = []
         eos_pad = torch.tensor([self.eos], device=self.device)
         for i, h in enumerate(hypos):
-            if data_replacement_samp_mask[i]:
-                index = torch.distributions.Categorical(
-                    probs=torch.tensor([1.0 for _ in range(h[0]["tokens"].shape[0])])).sample().to(self.device)
-                indices.append(index)
-                hypos_in[i] = torch.cat((h[0]["tokens"][:index], eos_pad), dim=0)
-            else:
-                if self.expert_generate:
-                    index = torch.distributions.Categorical(
-                        probs=torch.tensor(
-                            [1.0 for _ in range(expert_hypos[i][0]["tokens"].shape[0])])
-                    ).sample().to(self.device)
-                    indices.append(index)
-                    hypos_in[i] = torch.cat((expert_hypos[i][0]["tokens"][:index], eos_pad), dim=0)
-                else:
-                    index = torch.distributions.Categorical(
-                        probs=torch.tensor([1.0 for _ in range((hypos_in[i][0]["tokens"].shape[0]))])
-                    ).sample().to(self.device)
-                    indices.append(index)
-                    hypos_in[i] = torch.cat(
-                        (utils.strip_pad(torch.tensor(hypos_in[i], device=self.device), self.padding_idx)[:index],
-                         eos_pad),
-                        dim=0
-                    )
+            index = torch.distributions.Categorical(
+                probs=torch.tensor([1.0 for _ in range(h[0]["tokens"].shape[0])])).sample().to(self.device)
+            indices.append(index)
+            hypos_in[i] = torch.cat((h[0]["tokens"][:index], eos_pad), dim=0)
         hypos_up_to_t = collate_tokens(
             hypos_in,
             self.expert_vocab_src.pad(),
@@ -634,7 +563,7 @@ class Aggrevate(FairseqCriterion):
         expert_generator = SequenceGenerator(
             [self.expert],
             self.expert_vocab_tgt,
-            beam_size=1,
+            beam_size=1
         )
         expert_output = expert_generator.generate(
             [self.expert],
@@ -656,4 +585,3 @@ class Aggrevate(FairseqCriterion):
         rtg = self.calculate_bleu(targets, expert_output_samples)
         qts, bleu_diff, indicator = get_loss_components(net_output, rtg, indices, qt, ats)
         return bleu_diff, qts, indicator
-
