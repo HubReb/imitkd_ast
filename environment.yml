@@ -1,6 +1,9 @@
 name: train
 channels:
   - defaults
+  - pytorch-lts
+  - nvidia
+  - conda-forge
 dependencies:
   - python=3.7
   - nltk
@@ -8,9 +11,6 @@ dependencies:
   - pandas
   - cython
   - torchvision
-  - cudatoolkit=11.1
-  - pytorch
-  - torchaudio
   - fastbpe
   - faiss-gpu
   - scikit-learn
@@ -18,4 +18,10 @@ dependencies:
   - matplotlib
   - seaborn
   - mpl-probscale
+  - setuptools==59.5.0
+  - pytorch==1.8.2
+  - torchvision
+  - torchaudio
+  - cudatoolkit=11.1
   - tensorboard
+  - sacremoses
