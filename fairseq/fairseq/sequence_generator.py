@@ -793,7 +793,7 @@ class SequenceGenerator(nn.Module):
                         "knns": knns[i].cpu().numpy() if knnmt else None,
                         "vals": knn_vals[i].cpu().numpy() if knnmt else None,
                         "probs": knn_probs[i].cpu().numpy() if knnmt else None,
-                        "lprobs": lprobs[i].cpu() if isinstance(lprobs, torch.Tensor) else None
+                        #"lprobs": lprobs[i].cpu() if isinstance(lprobs, torch.Tensor) else None
                     }
                 )
 
