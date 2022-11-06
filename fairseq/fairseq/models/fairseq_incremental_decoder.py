@@ -29,7 +29,7 @@ class FairseqIncrementalDecoder(FairseqDecoder):
     argument (*incremental_state*) that can be used to cache state across
     time-steps.
 
-    The :class:`FairseqIncrementalDecoder` inforwardterface also defines the
+    The :class:`FairseqIncrementalDecoder` interface also defines the
     :func:`reorder_incremental_state` method, which is used during beam search
     to select and reorder the incremental state based on the selection of beams.
 
