@@ -24,9 +24,10 @@ from fairseq.checkpoint_utils import load_model_ensemble
 from fairseq.data import Dictionary
 from fairseq.sequence_generator import SequenceGenerator
 from fairseq.data import encoders
+from fairseq.criterions.helper_functions import collate_tokens
 
 @dataclass
-class OracleDiffConfig(FairseqDataclass):
+class AggrevateConfig(FairseqDataclass):
     expert: str = field(
         default="checkpoint_best.pt",
         metadata={"help": "NMT model to use as expert"},
@@ -193,9 +194,9 @@ def get_action_probs_and_rewards(net_output, expert_reward_to_go, indices, curre
 
 
 @register_criterion(
-    "aggrevate_nmt", dataclass=OracleDiffConfig
+    "aggrevate", dataclass=AggrevateConfig
 )
-class OracleDiff(FairseqCriterion):
+class Aggrevate(FairseqCriterion):
     def __init__(
             self,
             task,
@@ -436,25 +437,6 @@ class OracleDiff(FairseqCriterion):
         """
         return True
 
-    def collate_tokens(self, values, pad_idx, eos, left_pad, move_eos_to_beginning):
-        size = max(v.size(0) for v in values)
-        res = values[0].new(len(values), size).fill_(pad_idx)
-
-        def copy_tensor(src, dst):
-            assert dst.numel() == src.numel()
-            if move_eos_to_beginning:
-                assert src[-1] == eos
-                dst[0] = eos
-                dst[1:] = src[:-1]
-            else:
-                dst.copy_(src)
-
-        for i, v in enumerate(values):
-            if left_pad:
-                copy_tensor(v, res[i][size - len(v):])
-            else:
-                copy_tensor(v, res[i][:len(v)])
-        return res
 
     def calculate_bleu(self, target, hypos):
         bleu_scores = []
@@ -518,7 +500,7 @@ class OracleDiff(FairseqCriterion):
                         ).sample().cuda()
                         indices.append(index)
                         hypos_in[i] = torch.cat((utils.strip_pad(torch.tensor(hypos_in[i], device="cuda"), self.padding_idx)[:index]), dim=0)
-            hypos_up_to_t = self.collate_tokens(
+            hypos_up_to_t = collate_tokens(
                 hypos_in,
                 self.expert_vocab_src.pad(),
                 self.expert_vocab_src.eos(),
@@ -560,7 +542,7 @@ class OracleDiff(FairseqCriterion):
                 else:       # one element tensor
                     hypo_including_t.append(torch.cat((hypo, a_t.unsqueeze(dim=0)), dim=0))
                 ats.append(a_t)
-            hypos_to_t = self.collate_tokens(
+            hypos_to_t = collate_tokens(
                 hypo_including_t,
                 self.expert_vocab_src.pad(),
                 self.expert_vocab_src.eos(),
@@ -602,7 +584,7 @@ class OracleDiff(FairseqCriterion):
                     append_eos=True)
                 )
         src_lengths = [len(text) for text in source_texts]
-        source_text = self.collate_tokens(
+        source_text = collate_tokens(
             source_texts,
             self.expert_vocab_src.pad(),
             self.expert_vocab_src.eos(),
