@@ -257,7 +257,7 @@ class Aggrevate(FairseqCriterion):
             self.tokenizer = encoders.build_tokenizer(
                 Namespace(tokenizer=self.eval_bleu_detok, **detok_args)
             )
-        # adapted from https://github.com/jwieting/beyond-bleu/blob/master/fairseq/criterions/fairseq_sequence_criterion.py
+        # idea adapted from https://github.com/jwieting/beyond-bleu/blob/master/fairseq/criterions/fairseq_sequence_criterion.py
         scorer_config = namedtuple('scorer_config', ['pad', 'eos', 'unk'])  # variable name change for easier reading
         cfg = scorer_config(self.padding_idx, self.eos, self.dict.unk())
         self._scorer = bleu.Scorer(cfg)
