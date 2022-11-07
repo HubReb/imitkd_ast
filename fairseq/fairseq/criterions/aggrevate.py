@@ -6,7 +6,6 @@
 import math
 import copy
 from dataclasses import dataclass, field
-import json
 from argparse import Namespace
 from typing import List, Tuple, Dict
 from torch.distributions import Categorical
@@ -110,7 +109,7 @@ def valid_loss(lprobs, target, sample, model, tgt_dict, eval_bleu=False, ignore_
     return nll_loss, logging_output
 
 
-# adapted from fairseq method _inference_with_bleu of translation task
+# adapted from fairseq method _inference_with_bleu of translation task; 95% the same
 def inference_with_bleu(generator, sample, model, tgt_dict, tokenizer=None):
     import sacrebleu
 
@@ -154,7 +153,7 @@ def loss_calculation(bleu_diff, rs_student, indicator):
 def get_loss_components(net_output, expert_reward_to_go, indices, current_reward, ats):
     rse = []
     for i, tensor in enumerate(net_output[0]):
-        # why 8? -> works better
+        # why 8? -> works better; only rough mapping required
         max_value = torch.max(tensor[indices[i]])
         min_value = torch.min(tensor[indices[i]])
         scaled_tensor = 1 / (1 + torch.exp(
@@ -415,7 +414,6 @@ class Aggrevate(FairseqCriterion):
         bleu_scores = []
         for i, hypo in enumerate(hypos):
             ref = utils.strip_pad(target[i, :], self.padding_idx).cpu()
-
             ### slow  - not happy with this###
             # ref = self.tokenizer.decode(self.dict.string(utils.strip_pad(target[i, :], self.padding_idx).cpu(), unk_string="UNKNOWNTOKENINREF",
             #       bpe_symbol="fastBPE"))
@@ -435,7 +433,7 @@ class Aggrevate(FairseqCriterion):
         student_sample["net_input"].pop("src_text", None)
         hypos_in = sample["target"].data.tolist()
         max_length = max([len(i) for i in hypos_in])  # avoid OOM
-        student_generator = SequenceGenerator([model], self.dict, beam_size=1, max_len=max_length)
+        student_generator = SequenceGenerator([model], self.dict, beam_size=1, max_len=max_length)      # increase beam size? didn't seem to help last time, so leaving it at 1
         if self.uniform_sampling:
             dist = Categorical(torch.tensor([1 - self.sample_action_prob, self.sample_action_prob]))
             action_sampling_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
@@ -449,7 +447,7 @@ class Aggrevate(FairseqCriterion):
             index = torch.distributions.Categorical(
                 probs=torch.tensor([1.0 for _ in range(h[0]["tokens"].shape[0])])).sample().to(self.device)
             indices.append(index)
-            hypos_in[i] = torch.cat((h[0]["tokens"][:index], eos_pad), dim=0)
+            hypos_in[i] = torch.cat((h[0]["tokens"][:index], eos_pad), dim=0)       # eos has to be first if tensor is passed as prev_output_token
         hypos_up_to_t = collate_tokens(
             hypos_in,
             self.expert_vocab_src.pad(),
@@ -473,7 +471,7 @@ class Aggrevate(FairseqCriterion):
             }
             expert_output = self.expert.get_normalized_probs(self.expert(**out["net_input"]),
                                                              log_probs=True).argmax(dim=-1)
-        else:
+        else:   # don't get student's best action if only random uniform sampling is done
             if self.sample_action_prob < 1:
                 student_sample["net_input"]["prev_output_tokens"] = hypos_up_to_t.to(self.device)
                 model_output = model.get_normalized_probs(model(**student_sample["net_input"]), log_probs=True).argmax(
@@ -488,10 +486,7 @@ class Aggrevate(FairseqCriterion):
                 a_t = model_output[i][indices[i]]
             if not isinstance(hypo, torch.Tensor):
                 hypo = torch.tensor(hypo, device=self.device)
-            if hypo.shape[0] > 1:
-                hypo_including_t.append(torch.cat((hypo[:-1], a_t.unsqueeze(dim=0)), dim=0))
-            else:  # one element tensor
-                hypo_including_t.append(torch.cat((hypo, a_t.unsqueeze(dim=0)), dim=0))
+            hypo_including_t.append(torch.cat((hypo[:-1], a_t.unsqueeze(dim=0)), dim=0))        # remove eos pad again, otherwise expert output = prefix
             ats.append(a_t)
         hypos_to_t = collate_tokens(
             hypo_including_t,
@@ -579,7 +574,7 @@ class Aggrevate(FairseqCriterion):
         targets = sample['target'].data.int()
         net_output = model(**sample["net_input"])
         # avoid rewriting calculate_bleu method
-        student_hypos = [[{"tokens": utils.strip_pad(expert_input_sample, self.dict.pad())}] for expert_input_sample in
+        student_hypos = [[{"tokens": utils.strip_pad(hypo, self.dict.pad())}] for hypo in
                          hypos_to_t.cpu()]
         qt = self.calculate_bleu(targets, student_hypos)
         rtg = self.calculate_bleu(targets, expert_output_samples)
