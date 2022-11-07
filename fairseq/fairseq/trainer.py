@@ -656,14 +656,13 @@ class Trainer(object):
 
             xm.rendezvous("begin_epoch")  # wait for all workers
             xm.mark_step()
-        """
+
         try:
-            if self.criterion.beta:
-                mue = 25
-                self.criterion.beta =   mue/(mue+np.exp(epoch/mue))
+            if self.criterion.beta and self.cfg.optimization.max_epoch > 0:
+                self.criterion.beta = 200 ** (-(epoch / self.cfg.optimization.max_epoch))
         except AttributeError:
             pass
-        """
+
 
     def begin_valid_epoch(self, epoch):
         """Called at the beginning of each validation epoch."""
@@ -945,11 +944,12 @@ class Trainer(object):
         metrics.log_stop_time("train_wall")
 
         try:
-            if self.criterion.beta and self.cfg.optimization.max_update > 0:
-                t = self.get_num_updates()
-                # self.criterion.beta = 200 ** (-(t / self.cfg.optimization.max_update))
-                self.criterion.beta = 200 ** (-(t / self.cfg.optimization.max_update))
-                # self.criterion.beta =  1 / (1 + np.exp((t / self.cfg.optimization.max_update - 0.5) * 20))
+            if self.criterion.beta:
+                if self.cfg.optimization.max_update > 0:
+                    t = self.get_num_updates()
+                    # self.criterion.beta = 200 ** (-(t / self.cfg.optimization.max_update))
+                    self.criterion.beta = 200 ** (-(t / self.cfg.optimization.max_update))
+                    # self.criterion.beta =  1 / (1 + np.exp((t / self.cfg.optimization.max_update - 0.5) * 20))
         except AttributeError:
             pass
         return logging_output
