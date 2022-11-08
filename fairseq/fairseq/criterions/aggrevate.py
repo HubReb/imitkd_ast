@@ -232,7 +232,6 @@ class Aggrevate(FairseqCriterion):
 
     def forward(self, model, sample, reduce=True, valid=False):
         """Compute the loss for the given sample.
-
         Returns a tuple with three elements:
         1) the loss
         2) the sample size, which is used as the denominator for the gradient
@@ -479,14 +478,18 @@ class Aggrevate(FairseqCriterion):
         ats = []
         for i, hypo in enumerate(hypos_in):
             if action_sampling_mask[i]:
-                a_t = self.random_action_distribution.sample().to(self.device)
+                a_t = (self.random_action_distribution.sample() + 3).to(self.device)  # not eos (2), pad (1), unk (3)
             elif self.expert_action_chosen:
                 a_t = expert_output[i][indices[i]]
             else:
                 a_t = model_output[i][indices[i]]
             if not isinstance(hypo, torch.Tensor):
                 hypo = torch.tensor(hypo, device=self.device)
-            hypo_including_t.append(torch.cat((hypo[:-1], a_t.unsqueeze(dim=0)), dim=0))        # remove eos pad again, otherwise expert output = prefix
+            # hypo_including_t.append(torch.cat((hypo[:-1], a_t.unsqueeze(dim=0)), dim=0))        # remove eos pad again, otherwise expert output = prefix
+            if hypo.shape[0] > 1:
+                hypo_including_t.append(torch.cat((hypo[:-1], a_t.unsqueeze(dim=0)), dim=0))
+            else:  # one element tensor
+                hypo_including_t.append(torch.cat((hypo, a_t.unsqueeze(dim=0)), dim=0))
             ats.append(a_t)
         hypos_to_t = collate_tokens(
             hypo_including_t,
@@ -504,7 +507,6 @@ class Aggrevate(FairseqCriterion):
     ) -> Tuple[torch.IntTensor, List[int]]:
         """
         Turns the tokenized source text into bpe encodings.
-
         Args:
             sample: dataset batch
             eos_at_beginning: whether to put EOS token at the beginning of each sample (required for previous output tokens)
