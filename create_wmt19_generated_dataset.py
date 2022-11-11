@@ -28,62 +28,20 @@ def create_generated_dataset(reference2hypos, dataset, reference2transcripts=Non
     # dataframe has to have form (id, audio, n_frames, tgt_text, speaker, src_text)
     for i, row in enumerate(data_values):
         try:
-            if len(row) > 6:
-                if reference2transcripts:
-                    if (
-                        len(data_values[i][8]) < len(reference2transcripts[row[8]])
-                        and "REMOVE" in data_values[i][6]
-                    ):
-                        print(
-                            data_values[i][6],
-                            data_values[i][8],
-                            reference2transcripts[row[8]],
-                        )
-                        data_values[i][8] = reference2transcripts[
-                            row[8][: len(data_values[i][8]) * 5]
-                        ]
-                    else:
-                        data_values[i][8] = reference2transcripts[row[8]]
-                if reference2hypos != []:
-                    if (
-                        len(data_values[i][6]) * 5 < len(reference2hypos[row[6]])
-                        and "REMOVE" in data_values[i][6]
-                    ):
-                        data_values[i][6] = reference2hypos[
-                            row[6][: len(data_values[i][6]) * 5]
-                        ]
-                    else:
-                        data_values[i][6] = reference2hypos[row[6]]
-            else:
-                if reference2hypos != []:
-                    data_values[i][3] = reference2hypos[row[3]]
-                if reference2transcripts:
-                    data_values[i][5] = reference2transcripts[row[5]]
+            if reference2hypos != []:
+                data_values[i][3] = reference2hypos[row[3]]
+            if reference2transcripts:
+                data_values[i][5] = reference2transcripts[row[5]]
         except KeyError:
             pass
             # print(row)
 
     # print("max finished: ", max([len(i[8]) for i in data_values]))
-    if len(row) == 6:
-        new_data_frame = pd.DataFrame(
-            data_values,
-            columns=["id", "audio", "n_frames", "tgt_text", "speaker", "src_text"],
-        )
-    else:
-        new_data_frame = pd.DataFrame(
-            data_values,
-            columns=[
-                "Untitled",
-                "Untitled:1",
-                "Untitled:2",
-                "id",
-                "audio",
-                "n_frames",
-                "tgt_text",
-                "speaker",
-                "src_text",
-            ],
-        )
+    new_data_frame = pd.DataFrame(
+        data_values,
+        columns=["id", "audio", "n_frames", "tgt_text", "speaker", "src_text"],
+    )
+
     return new_data_frame
 
 
@@ -103,19 +61,13 @@ def run(generation_file, dataset_file, audiotranscriptsfile=None):
     else:
         dataset = create_generated_dataset(reference2hypos, dataset_file)
     if audiotranscriptsfile:
-        if generation_file != []:
-            dataset.to_csv(
-                f"{dataset_file.split('.tsv')[0]}_berard_wmt19_generated_from_transcripts.tsv",
-                index=False,
-                sep="\t",
-            )
-            with open(f"mustc_berard_de", "w") as f:
+        if generation_file == []:
+            with open(f"generated_transcripts", "w") as f:
                 f.write("\n".join(dataset["src_text"].values))
-            with open(f"mustc_berard_de", "w") as f:
-                f.write("\n".join(dataset["tgt_text"].values))
+
         else:
             dataset.to_csv(
-                f"{dataset_file.split('.tsv')[0]}_berard_from_transformer_transcripts.tsv",
+                f"{dataset_file.split('.tsv')[0]}_transcripts_wmt19_generated.tsv",
                 index=False,
                 sep="\t",
             )
