@@ -25,3 +25,4 @@ dependencies:
   - cudatoolkit=11.1
   - tensorboard
   - sacremoses
+  - soundfile
