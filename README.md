@@ -67,14 +67,30 @@ Audo data pre-processing was done as explained in fairseq speech-to-text module.
 
 Scripts to extract source transcripts and target translations from the csv Datafiles created by the speech-to-text pre-processing are included.
 
+The easiest way to create datasets with source transcripts and target translations is given in the speech-to-text modules [README](fairseq/examples/speech_to_text/README.md).
+
 
 For COVOST2 and MUST-C:
-1. Adapt the file paths in [get_src_to_st.py](fairseq/get_src_to_st.py) to fit your setup and simply run `python get_src_to_st.py`.
-2. Adapt the file paths in [get_source_text.py](fairseq/examples/speech_to_text/get_source_text.py) to your setup and run `python get_source_text.py`
-3. The extracted data files are saved in `${dataset_name}/${split_name}`
-4. Process the extracted text data the same you did for your NMT expert, e.g. by adapting [prepare-rest.sh](fairseq/examples/speech_to_text/prepare-rest.sh).
-5. Run `python get_source_text.py` again
-6. Adapt the configuration files to point to your NMT expert's vocabulary and BPE.
+1. Adapt the file paths in [get_source_text.py](fairseq/examples/speech_to_text/get_source_text.py) to your setup and run `python get_source_text.py`.
+2. Process the extracted text data the same you did for your NMT expert, e.g. by adapting [prepare-rest.sh](fairseq/examples/speech_to_text/prepare-rest.sh).
+3. Rerun `get_source_text.py`
+4. (Optional) The source transcripts and translations are extracted and processed during the above step. To  generate the binarized files run 
+```
+fairseq-preprocess --source-lang en --target-lang de     --trainpref ${PROCESSED_DATA}/train --validpref ${PROCESSED_DATA}/dev --testpref ${PROCESSED_DATA}/test  --destdir ${BINARIZED_DATA_DIR}  --workers 21 --srcdict ${WMT19_TRANSFORMERS_DICTIONARY}  --joined-dictionary
+```
+5. (Optional) Generate the translations of the gold transcripts with the WMT19 transformer to use sequence-level knowledge distillation later on.
+```
+fairseq-generate ${BINARIZED_DATA_DIR}\
+  --gen-subset train  --path ${WMT19_TRANSFORMER_DIRECTORY}/model1.pt  --max-tokens 5000 --beam 5 --remove-bpe --sacrebleu  > ${OUTPUT_FILE}
+```
+NOTE: This may take several minutes up to 2 hours, depending on your hardware.
+6. Run `python get_source_text.py` again
+7. (Optional) Run [create_wmt19_generated_dataset.py](create_wmt19_generated_dataset.py) to create the dataset consisting of the original transcripts to WMT19 translations of the transcripts:
+```
+python create_wmt19_generated_dataset.py -o ${OUTPUT_FILE} -d {PROCESSED_SPEECH_TO_TEXT_DATASET_FILE}
+```
+8. Adapt the configuration files to point to your NMT expert's vocabulary and BPE.
+9. 
 
 ## Model training and evaluation
 
@@ -127,9 +143,21 @@ Omit ` --best-checkpoint-metric bleu --maximize-best-checkpoint-metric --eval-bl
 
 
 The best way to run experiments with generated transcripts is to:
-1. use the ASR model to transcribe the speech data
-2. use the NMT expert model to translate those transcripts if you want to use generated target translations
-3. run `create_wmt19_generated_dataset.py` to create a new dataset of generated trancripts:
+1. use the ASR model to transcribe the speech data as demonstrated in the speech-to-text module examples
+2. extract the generated hypotheses with
+```
+python create_wmt19_generated_dataset.py -d ${speech-to-text dataset} -a ${LOGGED_ASR_MODEL_OUTPUT_ON_DATASET}
+```
+4. use the NMT expert model to translate those transcripts if you want to use generated target translations
+```
+${FASTBPE}/fast applybpe ${DATADIR}/output.en ${DATADIR}/${EXTRACTED_TRANSCRIPTS} ${BPECODES} ${WMT19_VOCAB}
+
+# binarize data - easiest to simply use the already extracted references here
+cp ${PROCESSED_DATA}/train.de ${DATADIR}/output.de
+fairseq-preprocess --source-lang en --target-lang de     --trainpref ${DATA_DIR}/train  --destdir ${BINARIZED_DATA_DIR}  --workers 21 --srcdict ${WMT19_TRANSFORMERS_DICTIONARY}  --joined-dictionary
+fairseq-generate ${BINARIZED_DATA_DIR}  --gen-subset train --path ${WMT19_TRANSFORMER_DIRECTORY}/model1.pt  --batch-size 32 --beam 5 --remove-bpe --sacrebleu  > ${LOG_FILE_TRANSCRIPT_TRANSLATIONS}
+```
+6. run `create_wmt19_generated_dataset.py` to create a new dataset of generated trancripts:
 ```
     python create_wmt19_generated_dataset.py -o ${fairseq-generate log file of NMT expert's translations} -a ${fairseq-generate log file of ASR model's transcripts} -d ${AST dataset file}
 ```
