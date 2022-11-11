@@ -168,8 +168,8 @@ def create_processed_datasets(mustc_folder, covost_folder):
     add_tokenized_text_to_target_old_fashioned(f"{covost_folder}/dev_asr_en.tsv", tokenized_dev_text,
                                                "covost_processed/dev_asr_processed.tsv")
     tokenized_test_text = get_tokenized_text("covost_processed_text/test.tok.en")
-    add_tokenized_text_to_target(f"{covost_folder}/test_asr.tsv", tokenized_test_text,
-                                               "covost_processed/test_asr_en_processed.tsv")
+    add_tokenized_text_to_target(f"{covost_folder}/test_asr_en.tsv", tokenized_test_text,
+                                               "covost_processed/test_asr_processed.tsv")
 
 
 
