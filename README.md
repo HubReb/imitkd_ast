@@ -48,6 +48,7 @@ pip install --editable .
 
 Installing fairseq like this is required to have access to the changes made to the framework in this repo.
 
+Install [fastBPE](https://github.com/glample/fastBPE). 
 
 ## Datasets
 
@@ -56,7 +57,7 @@ Installing fairseq like this is required to have access to the changes made to t
 | MUST-C (en-de)                                       | 408                | 234K                    |
 | COVOST2 (en-de)                                      | 430                | 319K                    |
 | Europarl-ST (en-de)                                  | 83                 | 35.5                    |
-| Europarl-ST (en-de)                                  | 173                | 72.4K                   |
+| Europarl-ST (en-de) + Europarl-ST (en-de) noisy      | 173                | 72.4K                   |
 
 
 
@@ -71,9 +72,9 @@ The easiest way to create datasets with source transcripts and target translatio
 
 
 For COVOST2 and MUST-C:
-1. Adapt the file paths in [get_source_text.py](fairseq/examples/speech_to_text/get_source_text.py) to your setup and run `python get_source_text.py`.
+1. Run [get_source_text.py](fairseq/examples/speech_to_text/get_source_text.py) `python get_source_text.py python -m ${MUSTC_DATA}/en-de/ -c ${COVOST_DATA}/en/`.
 2. Process the extracted text data the same you did for your NMT expert, e.g. by adapting [prepare-rest.sh](fairseq/examples/speech_to_text/prepare-rest.sh).
-3. Rerun `get_source_text.py`
+3. Rerun `python get_source_text.py python -m ${MUSTC_DATA}/en-de/ -c ${COVOST_DATA}/en/`
 4. (Optional) The source transcripts and translations are extracted and processed during the above step. To  generate the binarized files run 
 ```
 fairseq-preprocess --source-lang en --target-lang de     --trainpref ${PROCESSED_DATA}/train --validpref ${PROCESSED_DATA}/dev --testpref ${PROCESSED_DATA}/test  --destdir ${BINARIZED_DATA_DIR}  --workers 21 --srcdict ${WMT19_TRANSFORMERS_DICTIONARY}  --joined-dictionary
@@ -83,7 +84,7 @@ fairseq-preprocess --source-lang en --target-lang de     --trainpref ${PROCESSED
 fairseq-generate ${BINARIZED_DATA_DIR}\
   --gen-subset train  --path ${WMT19_TRANSFORMER_DIRECTORY}/model1.pt  --max-tokens 5000 --beam 5 --remove-bpe --sacrebleu  > ${OUTPUT_FILE}
 ```
-NOTE: This may take several minutes up to 2 hours, depending on your hardware.
+_NOTE_: This may take several minutes up to 2 hours, depending on your hardware.
 6. Run `python get_source_text.py` again
 7. (Optional) Run [create_wmt19_generated_dataset.py](create_wmt19_generated_dataset.py) to create the dataset consisting of the original transcripts to WMT19 translations of the transcripts:
 ```
