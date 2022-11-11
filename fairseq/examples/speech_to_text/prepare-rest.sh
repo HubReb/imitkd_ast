@@ -12,9 +12,14 @@ TOKENIZER=$SCRIPTS/tokenizer/tokenizer.perl
 CLEAN=$SCRIPTS/training/clean-corpus-n.perl
 NORM_PUNC=$SCRIPTS/tokenizer/normalize-punctuation.perl
 REM_NON_PRINT_CHAR=$SCRIPTS/tokenizer/remove-non-printing-char.perl
+HOME=/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/
+FASTBPE=$HOME/fastBPE
+BPECODES=$HOME/fairseq/wmt19.en-de.joined-dict.ensemble/bpecodes
+VOCAB=$HOME/fairseq//wmt19.en-de.joined-dict.ensemble/dict.en.txt
 
 fileen=mustc_processed/train_text_en.txt
 tmp=mustc_processed_text
+mkdir $tmp
 
 cat $fileen | \
   perl $NORM_PUNC $l | \
@@ -48,7 +53,10 @@ do
     perl $TOKENIZER -threads 16 -a -l de  >> ${tmp}/${split}.tok.de
 done
 
-fileen=covost/train_text_en.txt
+
+
+
+fileen=covost_processed/train_text_en.txt
 tmp=covost_processed_text
 
 cat $fileen | \
@@ -59,7 +67,7 @@ cat $fileen | \
 
 for split in dev test
 do
-  fileen=covost/${split}_text_en.txt
+  fileen=covost_processed/${split}_text_en.txt
 
   cat $fileen | \
     perl $TOKENIZER -threads 16 -a -l en >> ${tmp}/${split}.tok.en
@@ -68,7 +76,7 @@ done
 
 
 
-filede=covost/train_text.txt
+filede=covost_processed/train_text.txt
 tmp=covost_processed_text
 
 cat $filede | \
@@ -79,23 +87,20 @@ cat $filede | \
 
 for split in dev test
 do
-  filede=covost/${split}_text.txt
+  filede=covost_processed/${split}_text.txt
 
   cat $filede | \
     perl $TOKENIZER -threads 16 -a -l de >> ${tmp}/${split}.tok.de
 done
 
 
+for DATADIR in mustc_processed_text covost_processed_text
+do
+    for split in train dev test
+    do
+        $FASTBPE/fast applybpe ${DATADIR}/${split}.en ${DATADIR}/${split}.tok.en $BPECODES $VOCAB
+        $FASTBPE/fast applybpe ${DATADIR}/${split}.de ${DATADIR}/${split}.tok.de $BPECODES $VOCAB
+    done
+done
 
 
-
-"""
-filede=libri_processed/train_text.txt
-tmp=libri_processed_text
-
-cat $filede | \
-  perl $NORM_PUNC $l | \
-  perl $REM_NON_PRINT_CHAR | \
-  perl $TOKENIZER -threads 16 -a -l de  >> ${tmp}/train.tok.de
-
-"""
