@@ -11,7 +11,7 @@ import pandas as pd
 import torchaudio
 import torch
 
-from examples.speech_to_text.data_utils import (
+from data_utils import (
     create_zip,
     extract_fbank_features,
     filter_manifest_df,
@@ -180,25 +180,47 @@ def process(args):
     task = f"st_{args.src_lang}_{args.tgt_lang}" if args.tgt_lang else f"asr_{args.src_lang}"
     for split in EUROPARL.SPLITS:
         is_train_split = split.startswith("train")
+        if args.il:
+            MANIFEST_COLUMNS = ["id", "audio", "n_frames", "tgt_text", "src_text", "speaker"]
+        else:
+            MANIFEST_COLUMNS = ["id", "audio", "n_frames", "tgt_text", "speaker"]
+
         manifest = {c: [] for c in MANIFEST_COLUMNS}
         dataset = EUROPARL(
             args.data_root, split, args.src_lang, args.tgt_lang
         )
-        for wav, sr, src_utt, tgt_utt, speaker_id, utt_id in tqdm(dataset):
-            manifest["id"].append(utt_id)
-            manifest["audio"].append(zip_manifest[utt_id])
-            duration_ms = int(wav.size(1) / sr * 1000)
-            manifest["n_frames"].append(int(1 + (duration_ms - 25) / 10))
-            manifest["tgt_text"].append(src_utt if args.tgt_lang is None else tgt_utt)
-            manifest["speaker"].append(speaker_id)
+        if args.il:
+            for wav, sr, src_utt, tgt_utt, speaker_id, utt_id in tqdm(dataset):
+                manifest["id"].append(utt_id)
+                manifest["audio"].append(zip_manifest[utt_id])
+                duration_ms = int(wav.size(1) / sr * 1000)
+                manifest["n_frames"].append(int(1 + (duration_ms - 25) / 10))
+                manifest["tgt_text"].append(tgt_utt)
+                manifest["src_text"].append(src_utt)
+                manifest["speaker"].append(speaker_id)
+        else:
+            for wav, sr, src_utt, tgt_utt, speaker_id, utt_id in tqdm(dataset):
+                manifest["id"].append(utt_id)
+                manifest["audio"].append(zip_manifest[utt_id])
+                duration_ms = int(wav.size(1) / sr * 1000)
+                manifest["n_frames"].append(int(1 + (duration_ms - 25) / 10))
+                manifest["tgt_text"].append(src_utt if args.tgt_lang is None else tgt_utt)
+                manifest["speaker"].append(speaker_id)
         if is_train_split:
             train_text.extend(manifest["tgt_text"])
         df = pd.DataFrame.from_dict(manifest)
-        df = filter_manifest_df(df, is_train_split=is_train_split)
-        save_df_to_tsv(df, root / f"{split}_{task}.tsv")
+        if args.il:
+            df = filter_manifest_df(df, is_train_split=is_train_split, is_il=True)
+            save_df_to_tsv(df, root / f"{split}_{task}_with_source_text.tsv")
+        else:
+            df = filter_manifest_df(df, is_train_split=is_train_split)
+            save_df_to_tsv(df, root / f"{split}_{task}.tsv")
     # Generate vocab
     v_size_str = "" if args.vocab_type == "char" else str(args.vocab_size)
-    spm_filename_prefix = f"spm_{args.vocab_type}{v_size_str}_{task}"
+    if args.il:
+        spm_filename_prefix = f"spm_{args.vocab_type}{v_size_str}_{task}_with_source_text"
+    else:
+        spm_filename_prefix = f"spm_{args.vocab_type}{v_size_str}_{task}"
     with NamedTemporaryFile(mode="w") as f:
         for t in train_text:
             f.write(t + "\n")
@@ -232,6 +254,7 @@ def main():
     parser.add_argument("--vocab-size", default=8000, type=int)
     parser.add_argument("--src-lang", "-s", required=True, type=str)
     parser.add_argument("--tgt-lang", "-t", type=str)
+    parser.add_argument("--il", "-il", default=False, action="store_true")
     args = parser.parse_args()
     process(args)
 
