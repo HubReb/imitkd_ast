@@ -79,19 +79,18 @@ For COVOST2 and MUST-C:
 ```
 fairseq-preprocess --source-lang en --target-lang de     --trainpref ${PROCESSED_DATA}/train --validpref ${PROCESSED_DATA}/dev --testpref ${PROCESSED_DATA}/test  --destdir ${BINARIZED_DATA_DIR}  --workers 21 --srcdict ${WMT19_TRANSFORMERS_DICTIONARY}  --joined-dictionary
 ```
-5. (Optional) Generate the translations of the gold transcripts with the WMT19 transformer to use sequence-level knowledge distillation later on.
+5. (Optional) Generate the translations of the gold transcripts with the WMT19 transformer to use sequence-level knowledge distillation later on._NOTE_: This may take several minutes up to 2 hours, depending on your hardware.
 ```
 fairseq-generate ${BINARIZED_DATA_DIR}\
   --gen-subset train  --path ${WMT19_TRANSFORMER_DIRECTORY}/model1.pt  --max-tokens 5000 --beam 5 --remove-bpe --sacrebleu  > ${OUTPUT_FILE}
 ```
-_NOTE_: This may take several minutes up to 2 hours, depending on your hardware.
 6. Run `python get_source_text.py` again
 7. (Optional) Run [create_wmt19_generated_dataset.py](create_wmt19_generated_dataset.py) to create the dataset consisting of the original transcripts to WMT19 translations of the transcripts:
 ```
 python create_wmt19_generated_dataset.py -o ${OUTPUT_FILE} -d {PROCESSED_SPEECH_TO_TEXT_DATASET_FILE}
 ```
-8. Adapt the configuration files to point to your NMT expert's vocabulary and BPE.
-9. 
+8. Adapt the configuration files (`config_{task}.yaml`) to point to your NMT expert's vocabulary and BPE. The configuration files are in `{MUSTC_DATA}/en-de/` and  `${COVOST_DATA}/en/`.
+ 
 
 ## Model training and evaluation
 
@@ -149,7 +148,7 @@ The best way to run experiments with generated transcripts is to:
 ```
 python create_wmt19_generated_dataset.py -d ${speech-to-text dataset} -a ${LOGGED_ASR_MODEL_OUTPUT_ON_DATASET}
 ```
-4. use the NMT expert model to translate those transcripts if you want to use generated target translations
+3. use the NMT expert model to translate those transcripts if you want to use generated target translations
 ```
 ${FASTBPE}/fast applybpe ${DATADIR}/output.en ${DATADIR}/${EXTRACTED_TRANSCRIPTS} ${BPECODES} ${WMT19_VOCAB}
 
@@ -158,11 +157,11 @@ cp ${PROCESSED_DATA}/train.de ${DATADIR}/output.de
 fairseq-preprocess --source-lang en --target-lang de     --trainpref ${DATA_DIR}/train  --destdir ${BINARIZED_DATA_DIR}  --workers 21 --srcdict ${WMT19_TRANSFORMERS_DICTIONARY}  --joined-dictionary
 fairseq-generate ${BINARIZED_DATA_DIR}  --gen-subset train --path ${WMT19_TRANSFORMER_DIRECTORY}/model1.pt  --batch-size 32 --beam 5 --remove-bpe --sacrebleu  > ${LOG_FILE_TRANSCRIPT_TRANSLATIONS}
 ```
-6. run `create_wmt19_generated_dataset.py` to create a new dataset of generated trancripts:
+4. run `create_wmt19_generated_dataset.py` to create a new dataset of generated trancripts:
 ```
     python create_wmt19_generated_dataset.py -o ${fairseq-generate log file of NMT expert's translations} -a ${fairseq-generate log file of ASR model's transcripts} -d ${AST dataset file}
 ```
-4. use the new dataset just like the original datasets 
+5. use the new dataset just like the original datasets 
 
 
 
