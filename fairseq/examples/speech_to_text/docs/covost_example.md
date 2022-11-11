@@ -4,6 +4,8 @@
 We replicate the experiments in
 [CoVoST 2 and Massively Multilingual Speech-to-Text Translation (Wang et al., 2020)](https://arxiv.org/abs/2007.10310).
 
+
+
 ## Data Preparation
 [Download](https://commonvoice.mozilla.org/en/datasets) and unpack Common Voice v4 to a path
 `${COVOST_ROOT}/${SOURCE_LANG_ID}`, then preprocess it with
@@ -24,6 +26,13 @@ The generated files (manifest, features, vocabulary and data configuration) will
 `${COVOST_ROOT}/${SOURCE_LANG_ID}`.
 
 
+## Data format
+
+Audio files are given as mp3s.
+To reduce the audio quality to the same level as in MuST-C, ffmpeg can be used:
+```bash
+bash reduce_audio_q.sh 2&>> convert.log
+```
 
 Download our vocabulary files if you want to use our pre-trained models:
 - ASR: [En](https://dl.fbaipublicfiles.com/fairseq/s2t/covost2_en_asr_vocab_char.zip)
