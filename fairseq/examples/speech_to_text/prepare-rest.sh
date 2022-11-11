@@ -4,8 +4,8 @@
 echo 'Cloning Moses github repository (for tokenization scripts)...'
 git clone https://github.com/moses-smt/mosesdecoder.git
 
-echo 'Cloning Subword NMT repository (for BPE pre-processing)...'
-git clone https://github.com/rsennrich/subword-nmt.git
+#echo 'Cloning Subword NMT repository (for BPE pre-processing)...'
+#git clone https://github.com/rsennrich/subword-nmt.git
 
 SCRIPTS=mosesdecoder/scripts
 TOKENIZER=$SCRIPTS/tokenizer/tokenizer.perl
@@ -16,6 +16,7 @@ HOME=/home/rebekka/t2b/Projekte/ma/knn_ast_kd_nmt/
 FASTBPE=$HOME/fastBPE
 BPECODES=$HOME/fairseq/wmt19.en-de.joined-dict.ensemble/bpecodes
 VOCAB=$HOME/fairseq//wmt19.en-de.joined-dict.ensemble/dict.en.txt
+BPEROOT=subword-nmt/subword_nmt
 
 fileen=mustc_processed/train_text_en.txt
 tmp=mustc_processed_text
@@ -55,9 +56,9 @@ done
 
 
 
-
 fileen=covost_processed/train_text_en.txt
 tmp=covost_processed_text
+mkdir $tmp
 
 cat $fileen | \
   perl $NORM_PUNC $l | \
@@ -92,7 +93,6 @@ do
   cat $filede | \
     perl $TOKENIZER -threads 16 -a -l de >> ${tmp}/${split}.tok.de
 done
-
 
 for DATADIR in mustc_processed_text covost_processed_text
 do
