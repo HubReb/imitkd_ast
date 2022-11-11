@@ -48,7 +48,7 @@ pip install --editable .
 
 Installing fairseq like this is required to have access to the changes made to the framework in this repo.
 
-Install [fastBPE](https://github.com/glample/fastBPE). 
+Download and compile [fastBPE](https://github.com/glample/fastBPE). 
 
 ## Datasets
 
