@@ -12,19 +12,27 @@ We replicate the experiments in
 pip install pandas torchaudio sentencepiece
 
 # En ASR
-python examples/speech_to_text/prep_covost_data.py \
+cd examples/speech_to_text
+python prep_covost_data.py \
   --data-root ${COVOST_ROOT} --vocab-type char --src-lang en
 # ST
-python examples/speech_to_text/prep_covost_data.py \
+python prep_covost_data.py \
   --data-root ${COVOST_ROOT} --vocab-type char \
-  --src-lang fr --tgt-lang en
+  --src-lang en --tgt-lang de
 ```
 The generated files (manifest, features, vocabulary and data configuration) will be added to
 `${COVOST_ROOT}/${SOURCE_LANG_ID}`.
 
+
+
 Download our vocabulary files if you want to use our pre-trained models:
 - ASR: [En](https://dl.fbaipublicfiles.com/fairseq/s2t/covost2_en_asr_vocab_char.zip)
 - ST: [Fr-En](https://dl.fbaipublicfiles.com/fairseq/s2t/covost2_fr_en_st_vocab_char.zip), [De-En](https://dl.fbaipublicfiles.com/fairseq/s2t/covost2_de_en_st_vocab_char.zip), [Es-En](https://dl.fbaipublicfiles.com/fairseq/s2t/covost2_es_en_st_vocab_char.zip), [Ca-En](https://dl.fbaipublicfiles.com/fairseq/s2t/covost2_ca_en_st_vocab_char.zip), [En-De](https://dl.fbaipublicfiles.com/fairseq/s2t/covost2_en_de_st_vocab_char.zip), [En-Ca](https://dl.fbaipublicfiles.com/fairseq/s2t/covost2_en_ca_st_vocab_char.zip), [En-Fa](https://dl.fbaipublicfiles.com/fairseq/s2t/covost2_en_fa_st_vocab_char.zip), [En-Et](https://dl.fbaipublicfiles.com/fairseq/s2t/covost2_en_et_st_vocab_char.zip)
+
+
+
+
+
 
 ## ASR
 #### Training

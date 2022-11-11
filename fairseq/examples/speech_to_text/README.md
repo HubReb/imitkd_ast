@@ -29,6 +29,16 @@ requires arguments `--task speech_to_text` and `--config-yaml <config YAML filen
 audio paths (one per line) as inputs.
 
 
+## ImitKD dataset creation - added
+
+Simply pass the `--il` flag when processing dataset, e. g. for CoVoST 2:
+
+```bash
+python examples/speech_to_text/prep_covost_data.py \
+  --data-root ${COVOST_ROOT} --vocab-type char \
+  --src-lang en --tgt-lang de --il
+```
+
 ## Examples
 - [Speech Recognition (ASR) on LibriSpeech](docs/librispeech_example.md)
 

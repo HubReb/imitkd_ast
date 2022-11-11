@@ -15,10 +15,11 @@ pip install pandas torchaudio soundfile sentencepiece
 
 # Generate TSV manifests, features, vocabulary
 # and configuration for each language
-python examples/speech_to_text/prep_mustc_data.py \
+cd examples/speech_to_text
+python prep_mustc_data.py \
   --data-root ${MUSTC_ROOT} --task asr \
   --vocab-type unigram --vocab-size 5000
-python examples/speech_to_text/prep_mustc_data.py \
+python prep_mustc_data.py \
   --data-root ${MUSTC_ROOT} --task st \
   --vocab-type unigram --vocab-size 8000
 
