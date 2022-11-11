@@ -158,7 +158,7 @@ class CoVoST(Dataset):
         self.data = []
         for e in data:
             try:
-                # e["path"] = e["path"].replace(".mp3", ".wav")
+                e["path"] = e["path"].replace(".mp3", ".wav")
                 path = self.root / "clips" / e["path"]
                 _ = torchaudio.info(path.as_posix())
                 self.data.append(e)
@@ -184,6 +184,7 @@ class CoVoST(Dataset):
         translation = None if self.no_translation else data["translation"]
         speaker_id = data["client_id"]
         _id = data["path"].replace(".wav", "")
+        # _id = data["path"].replace(".mp3", "")
         return waveform, sample_rate, sentence, translation, speaker_id, _id
 
     def __len__(self) -> int:
@@ -247,14 +248,14 @@ def process(args):
         df = pd.DataFrame.from_dict(manifest)
         if args.il:
             df = filter_manifest_df(df, is_train_split=is_train_split, is_il=True)
-            save_df_to_tsv(df, root / f"{split}_{args.task}_with_source_text.tsv")
+            save_df_to_tsv(df, root / f"{split}_{task}_with_source_text.tsv")
         else:
             df = filter_manifest_df(df, is_train_split=is_train_split)
-            save_df_to_tsv(df, root / f"{split}_{args.task}.tsv")
+            save_df_to_tsv(df, root / f"{split}_{task}.tsv")
     # Generate vocab
     vocab_size_str = "" if args.vocab_type == "char" else str(args.vocab_size)
     if args.il:
-        spm_filename_prefix = f"spm_{args.vocab_type}{v_size_str}_{args.task}_with_source_text"
+        spm_filename_prefix = f"spm_{args.vocab_type}{vocab_size_str}_{task}_with_source_text"
     else:
         spm_filename_prefix = f"spm_{args.vocab_type}{vocab_size_str}_{task}"
     with NamedTemporaryFile(mode="w") as f:
