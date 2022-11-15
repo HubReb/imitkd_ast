@@ -22,7 +22,7 @@ from fairseq.criterions.helper_functions import valid_loss, collate_tokens
 
 
 @dataclass
-class ImitKDConfigCheckedPredictionsWithGoldReferencesCopy(FairseqDataclass):
+class KDConfig(FairseqDataclass):
     expert: str = field(
         default="checkpoint_best.pt",
         metadata={"help": "NMT model to use as expert"},
@@ -59,7 +59,7 @@ class ImitKDConfigCheckedPredictionsWithGoldReferencesCopy(FairseqDataclass):
 
 
 
-def imit_kd_loss(
+def kd_loss(
         generated_dataset,
         model,
         expert,
@@ -108,9 +108,9 @@ def imit_kd_loss(
 
 
 @register_criterion(
-    "imit_kd_copy_expert", dataclass=ImitKDConfigCheckedPredictionsWithGoldReferencesCopy
+    "kd", dataclass=KDConfig
 )
-class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
+class KD(FairseqCriterion):
     def __init__(
             self,
             task,
@@ -186,7 +186,7 @@ class ImitKDCheckedPredictionsWithGoldReferences(FairseqCriterion):
             source_text, source_lengths = self.transform_source_tokens_into_expert_voc(sample)
             sample_s = copy.deepcopy(sample)
             sample_s["net_input"].pop("src_text", None)
-            loss = imit_kd_loss(
+            loss = kd_loss(
                 sample_s,
                 model,
                 self.expert,
