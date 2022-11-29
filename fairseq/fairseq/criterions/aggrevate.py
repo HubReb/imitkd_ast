@@ -93,6 +93,7 @@ def valid_loss(lprobs, target, sample, model, tgt_dict, eval_bleu=False, ignore_
         nll_loss = nll_loss.sum()
 
     # adapted from translation task
+    logging_output = {}
     if eval_bleu:
         EVAL_BLEU_ORDER = 4
         logging_output = {}
@@ -106,6 +107,7 @@ def valid_loss(lprobs, target, sample, model, tgt_dict, eval_bleu=False, ignore_
         for i in range(EVAL_BLEU_ORDER):
             logging_output["_bleu_counts_" + str(i)] = bleu.counts[i]
             logging_output["_bleu_totals_" + str(i)] = bleu.totals[i]
+
     return nll_loss, logging_output
 
 
@@ -249,25 +251,37 @@ class Aggrevate(FairseqCriterion):
         # for ImitKD we compare dev performance with NLL against target, not NLL against expert predicts
         # -> hack2 to avoid breaking hack1
         if valid:
-            loss, logged_bleu = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
+            nll_loss, loss, logged_bleu, bleu_diff, student_log, indicator_sum, bleu_for_complete_student_hypos, bleu_for_complete_expert = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
             logging_output = {
                 "loss": loss.data,
+                "nll_loss": nll_loss.data,
                 "ntokens": sample["ntokens"],
                 "nsentences": sample["target"].size(0),
                 "sample_size": sample["ntokens"],
-                "bleu": logged_bleu
+                "bleu": logged_bleu,
+                "indicator_sum": indicator_sum,
+                "bleu_diff": bleu_diff.data,
+                "student_log": student_log.data,
+                "bleu_complete_student_continuation": bleu_for_complete_student_hypos.data,
+                "bleu_complete_expert_continuation": bleu_for_complete_expert.data
+
             }
         else:
-            loss, bleu_diff, student_log, indicator_sum = self.compute_loss(model, net_output, sample, reduce=reduce,
-                                                                          valid=valid)
+            loss, bleu_diff, student_log, indicator_sum, bleu_for_complete_student_hypos, bleu_for_complete_expert = self.compute_loss(model,
+                                                                                                             net_output,
+                                                                                                             sample,
+                                                                                                             reduce=reduce,
+                                                                                                             valid=valid)
             logging_output = {
                 "loss": loss.data,
                 "bleu_diff": bleu_diff.data,
                 "student_log": student_log.data,
                 "ntokens": sample["ntokens"],
                 "nsentences": sample["target"].size(0),
-                "sample_size": sample_size,
-                "indicator_sum": indicator_sum
+                "sample_size": sample["ntokens"],
+                "indicator_sum": indicator_sum,
+                "bleu_complete_student_continuation": bleu_for_complete_student_hypos.data,
+                "bleu_complete_expert_continuation": bleu_for_complete_expert.data
             }
         if self.report_accuracy:
             n_correct, total = self.compute_accuracy(model, net_output, sample)
@@ -289,24 +303,35 @@ class Aggrevate(FairseqCriterion):
 
     def compute_loss(self, model, net_output, sample, reduce=True, valid=False):
         if valid:
+            source_text, _ = self.transform_source_tokens_into_expert_voc(sample)
             sample["net_input"].pop("src_text", None)
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
-            loss, logged_bleu = valid_loss(lprobs, target, sample, model, self.expert_vocab_tgt, self.eval_bleu,
-                                           self.ignore_prefix_size, reduce=reduce, tokenizer=self.tokenizer)
-            return loss, logged_bleu
+            nll_loss, logged_bleu = valid_loss(lprobs, target, sample, model, self.expert_vocab_tgt, self.eval_bleu,
+                                               self.ignore_prefix_size, reduce=reduce, tokenizer=self.tokenizer)
+            expert_input, indices, ats = self.get_student_predictions_and_pass_to_expert(model, sample, source_text)
+            expert_output_samples = self.get_expert_output(sample, source_text, expert_input)
+            bleu_diff, student_log, indicator, complete_student_bleu, complete_expert_bleu = self.calculate_rewards(sample, model,
+                                                                                              expert_output_samples,
+                                                                                              expert_input, indices,
+                                                                                              ats)
+            loss, bleu_diff_log, student_log, indicator = loss_calculation(
+                bleu_diff, student_log, indicator
+            )
+            return nll_loss, loss, logged_bleu, bleu_diff_log, student_log, indicator, complete_student_bleu.sum(), complete_expert_bleu.sum()
         else:
             with torch.no_grad():
                 source_text, _ = self.transform_source_tokens_into_expert_voc(sample)
                 expert_input, indices, ats = self.get_student_predictions_and_pass_to_expert(model, sample, source_text)
                 expert_output_samples = self.get_expert_output(sample, source_text, expert_input)
             model.train()  # call to SequenceGenerator sets model to eval mode, set model back to train
-            bleu_diff, student_log, indicator = self.calculate_rewards(sample, model,
-                                                                      expert_output_samples,
-                                                                      expert_input, indices, ats)
+            bleu_diff, student_log, indicator, complete_student_bleu, complete_expert_bleu = self.calculate_rewards(sample, model,
+                                                                                              expert_output_samples,
+                                                                                              expert_input, indices,
+                                                                                              ats)
             loss, bleu_diff_log, student_log, indicator = loss_calculation(
                 bleu_diff, student_log, indicator
             )
-        return loss, bleu_diff_log, student_log, indicator
+        return loss, bleu_diff_log, student_log, indicator, complete_student_bleu.sum(), complete_expert_bleu.sum()
 
     def compute_accuracy(self, model, net_output, sample):
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
@@ -325,24 +350,39 @@ class Aggrevate(FairseqCriterion):
         loss_sum = sum(log.get("loss", 0) for log in logging_outputs)
         # ntokens = sum(log.get("ntokens", 0) for log in logging_outputs)
         sample_size = sum(log.get("sample_size", 0) for log in logging_outputs)
+        nsentences = sum(log.get("nsentences", 0) for log in logging_outputs)
         bleu_diff = sum(log.get("bleu_diff", 0) for log in logging_outputs)
         student_log = sum(log.get("student_log", 0) for log in logging_outputs)
         indicator_sum = sum(log.get("indicator_sum", 0) for log in logging_outputs)
+        bleu_student_complete = sum(log.get("bleu_complete_student_continuation", 0) for log in logging_outputs)
+        bleu_expert_complete = sum(log.get("bleu_complete_expert_continuation", 0) for log in logging_outputs)
         metrics.log_scalar(
-            "loss", loss_sum / sample_size / math.log(2), sample_size, round=3
+            "loss", loss_sum / nsentences, nsentences, round=3
         )
         metrics.log_scalar(
-            "bleu_diff", bleu_diff / sample_size, sample_size, round=3
+            "bleu_diff", bleu_diff / nsentences, nsentences, round=3
+        )
+        metrics.log_scalar(
+            "bleu_complete_student_continuation",  bleu_student_complete / nsentences, nsentences, round=3
+        )
+        metrics.log_scalar(
+            "bleu_complete_expert_continuation",  bleu_expert_complete / nsentences, nsentences, round=3
         )
         if indicator_sum > 0:
             metrics.log_scalar(
-                "bleu_diff_no_zeros", bleu_diff / indicator_sum, sample_size, round=3
+                "bleu_diff_no_zeros", bleu_diff / indicator_sum, nsentences, round=3
+            )
+            metrics.log_scalar(
+                "bleu_complete_student_continuation_no_zeros", bleu_student_complete / indicator_sum, nsentences, round=3
+            )
+            metrics.log_scalar(
+                "bleu_complete_expert_continuation_no_zeros", bleu_expert_complete / indicator_sum, nsentences, round=3
             )
         metrics.log_scalar(
-            "student_log", student_log / sample_size, sample_size, round=3
+            "bleu_student_t", student_log / sample_size, nsentences, round=3
         )
         metrics.log_scalar(
-            "indicator_percentage", indicator_sum / sample_size, sample_size, round=3
+            "indicator_percentage", indicator_sum / nsentences, nsentences, round=3
         )
         total = utils.item(sum(log.get("total", 0) for log in logging_outputs))
         if total > 0:
@@ -358,6 +398,11 @@ class Aggrevate(FairseqCriterion):
                 )
                 if meters["total"].sum > 0
                 else float("nan"),
+            )
+        if "nll_loss" in logging_outputs[0].keys():
+            nll_loss_sum = sum(log.get("nll_loss", 0) for log in logging_outputs)
+            metrics.log_scalar(
+                "nll_loss", nll_loss_sum / sample_size / math.log(2), sample_size, round=3
             )
         # adapted from translation task
         if "bleu" in logging_outputs[0].keys():
@@ -432,7 +477,8 @@ class Aggrevate(FairseqCriterion):
         student_sample["net_input"].pop("src_text", None)
         hypos_in = sample["target"].data.tolist()
         max_length = max([len(i) for i in hypos_in])  # avoid OOM
-        student_generator = SequenceGenerator([model], self.dict, beam_size=1, max_len=max_length)      # increase beam size? didn't seem to help last time, so leaving it at 1
+        student_generator = SequenceGenerator([model], self.dict, beam_size=1,
+                                              max_len=max_length)  # increase beam size? didn't seem to help last time, so leaving it at 1
         if self.uniform_sampling:
             dist = Categorical(torch.tensor([1 - self.sample_action_prob, self.sample_action_prob]))
             action_sampling_mask = [dist.sample((sample["net_input"]["prev_output_tokens"].size(0),)) == 1][0]
@@ -446,7 +492,8 @@ class Aggrevate(FairseqCriterion):
             index = torch.distributions.Categorical(
                 probs=torch.tensor([1.0 for _ in range(h[0]["tokens"].shape[0])])).sample().to(self.device)
             indices.append(index)
-            hypos_in[i] = torch.cat((h[0]["tokens"][:index], eos_pad), dim=0)       # eos has to be first if tensor is passed as prev_output_token
+            hypos_in[i] = torch.cat((h[0]["tokens"][:index], eos_pad),
+                                    dim=0)  # eos has to be first if tensor is passed as prev_output_token
         hypos_up_to_t = collate_tokens(
             hypos_in,
             self.expert_vocab_src.pad(),
@@ -470,7 +517,7 @@ class Aggrevate(FairseqCriterion):
             }
             expert_output = self.expert.get_normalized_probs(self.expert(**out["net_input"]),
                                                              log_probs=True).argmax(dim=-1)
-        else:   # don't get student's best action if only random uniform sampling is done
+        else:  # don't get student's best action if only random uniform sampling is done
             if self.sample_action_prob < 1:
                 student_sample["net_input"]["prev_output_tokens"] = hypos_up_to_t.to(self.device)
                 model_output = model.get_normalized_probs(model(**student_sample["net_input"]), log_probs=True).argmax(
@@ -578,7 +625,19 @@ class Aggrevate(FairseqCriterion):
         # avoid rewriting calculate_bleu method
         student_hypos = [[{"tokens": utils.strip_pad(hypo, self.dict.pad())}] for hypo in
                          hypos_to_t.cpu()]
+        student_generator = SequenceGenerator(
+            [model],
+            self.dict,
+            beam_size=1
+        )
+        complete_student_hypo = student_generator.generate(
+            [model],
+            sample,
+            prefix_tokens=hypos_to_t.to(self.device)
+        )
         qt = self.calculate_bleu(targets, student_hypos)
+        q_t_T = self.calculate_bleu(targets, complete_student_hypo)
+        q_t_T = torch.tensor([score / 100 for score in q_t_T], device=self.device)
         rtg = self.calculate_bleu(targets, expert_output_samples)
         qts, bleu_diff, indicator = get_loss_components(net_output, rtg, indices, qt, ats)
-        return bleu_diff, qts, indicator
+        return bleu_diff, qts, indicator, q_t_T, torch.tensor([score/100 for score in rtg], device=self.device)
