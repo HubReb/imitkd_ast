@@ -614,10 +614,10 @@ class Aggrevate(FairseqCriterion):
     def calculate_rewards(self, sample, model, expert_output_samples, hypos_up_to_t,  hypos_to_t, indices, ats):
         eos_pad = torch.tensor([self.dict.eos() for _ in range(hypos_up_to_t.shape[0])], device=self.device).view(-1, 1)
         sample["net_input"]["prev_output_tokens"] = torch.cat((eos_pad, hypos_up_to_t), dim=1).to(self.device)
+        sample["net_input"].pop("src_text", None)
         net_output = model(**sample["net_input"])
         eos_pad = torch.tensor([self.dict.eos() for _ in range(hypos_to_t.shape[0])], device=self.device).view(-1, 1)
         sample["net_input"]["prev_output_tokens"] = torch.cat((eos_pad, hypos_to_t), dim=1).to(self.device)
-        sample["net_input"].pop("src_text", None)
         targets = sample['target'].data.int()
         net_output = model.get_normalized_probs(net_output, log_probs=True)
         # avoid rewriting calculate_bleu method
