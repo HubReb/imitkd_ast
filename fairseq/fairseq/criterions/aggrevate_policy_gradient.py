@@ -155,7 +155,7 @@ def loss_calculation(bleu_diff, student_actions, indicator):
 def get_loss_components(net_output, expert_reward_to_go, indices, current_reward, ats):
     rse = []
     for i, tensor in enumerate(net_output):
-        action_tensor = tensor[indices[i],ats[i]]
+        action_tensor = tensor[indices[i], ats[i]]
         rse.append(action_tensor)
     actions = torch.stack(rse, dim=0)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -612,8 +612,7 @@ class Aggrevate(FairseqCriterion):
         return expert_output
 
     def calculate_rewards(self, sample, model, expert_output_samples, hypos_up_to_t,  hypos_to_t, indices, ats):
-        eos_pad = torch.tensor([self.dict.eos() for _ in range(hypos_up_to_t.shape[0])], device=self.device).view(-1, 1)
-        sample["net_input"]["prev_output_tokens"] = torch.cat((eos_pad, hypos_up_to_t), dim=1).to(self.device)
+        sample["net_input"]["prev_output_tokens"] = hypos_up_to_t
         sample["net_input"].pop("src_text", None)
         net_output = model(**sample["net_input"])
         eos_pad = torch.tensor([self.dict.eos() for _ in range(hypos_to_t.shape[0])], device=self.device).view(-1, 1)

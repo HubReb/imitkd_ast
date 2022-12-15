@@ -624,8 +624,8 @@ class Aggrevate(FairseqCriterion):
         return expert_output
 
     def calculate_rewards(self, sample, model, expert_output_samples, hypos_up_to_t, hypos_to_t, indices, ats):
+        sample["net_input"]["prev_output_tokens"] = hypos_up_to_t
         eos_pad = torch.tensor([self.dict.eos() for _ in range(hypos_up_to_t.shape[0])], device=self.device).view(-1, 1)
-        sample["net_input"]["prev_output_tokens"] = torch.cat((eos_pad, hypos_up_to_t), dim=1).to(self.device)
         sample["net_input"].pop("src_text", None)
         net_output = model(**sample["net_input"])
         sample["net_input"]["prev_output_tokens"] = torch.cat((eos_pad, hypos_to_t), dim=1).to(self.device)
