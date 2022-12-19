@@ -70,7 +70,7 @@ class AggrevateConfig(FairseqDataclass):
         default=False,
         metadata={"help": "hack - pass flag if best checkpoint metric is bleu to compute BLEU score"}
     )
-    eval_bleu: bool = field(
+    sample_from_distribution: bool = field(
         default=False,
         metadata={"help": "sample from model distribution for each time step"}
     )
@@ -519,18 +519,18 @@ class Aggrevate(FairseqCriterion):
             expert_output = self.expert.get_normalized_probs(self.expert(**out["net_input"]),
                                                              log_probs=True).argmax(dim=-1)
         else:  # don't get student's best action if only random uniform sampling is done
-            if self.sample_action_prob < 1:
+            if self.sample_action_prob < 1 or self.sample_from_distribution:
                 student_sample["net_input"]["prev_output_tokens"] = hypos_up_to_t.to(self.device)
                 model_output_probs = model.get_normalized_probs(model(**student_sample["net_input"]), log_probs=True)
                 model_output = model_output_probs.argmax(dim=-1)
         ats = []
         for i, hypo in enumerate(hypos_in):
-            if action_sampling_mask[i]:
+            if self.sample_from_distribution:
+                a_t = torch.distributions.Categorical(probs=model_output_probs).sample()
+            elif action_sampling_mask[i]:
                 a_t = (self.random_action_distribution.sample() + 3).to(self.device)  # not eos (2), pad (1), unk (3)
             elif self.expert_action_chosen:
                 a_t = expert_output[i][indices[i]]
-            elif self.sample_from_distribution:
-                a_t = torch.distributions.Categorical(probs=model_output_probs).sample()
             else:
                 a_t = model_output[i][indices[i]]
             if not isinstance(hypo, torch.Tensor):
