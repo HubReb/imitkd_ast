@@ -526,7 +526,7 @@ class Aggrevate(FairseqCriterion):
         ats = []
         for i, hypo in enumerate(hypos_in):
             if self.sample_from_distribution:
-                a_t = torch.distributions.Categorical(probs=model_output_probs).sample()
+                a_t = torch.distributions.Categorical(probs=model_output_probs[i][indices[i]]).sample()
             elif action_sampling_mask[i]:
                 a_t = (self.random_action_distribution.sample() + 3).to(self.device)  # not eos (2), pad (1), unk (3)
             elif self.expert_action_chosen:
