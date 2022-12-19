@@ -70,6 +70,10 @@ class AggrevateConfig(FairseqDataclass):
         default=False,
         metadata={"help": "hack - pass flag if best checkpoint metric is bleu to compute BLEU score"}
     )
+    eval_bleu: bool = field(
+        default=False,
+        metadata={"help": "sample from model distribution for each time step"}
+    )
     eval_bleu_detok: str = field(
         default="space",
         metadata={
@@ -183,6 +187,7 @@ class Aggrevate(FairseqCriterion):
             sample_action_prob,
             eval_bleu,
             eval_bleu_detok,
+            sample_from_distribution,
             ignore_prefix_size=0,
             report_accuracy=False,
     ):
@@ -200,6 +205,7 @@ class Aggrevate(FairseqCriterion):
         self.sentence_avg = True
         self.expert_action_chosen = expert_action_chosen
         self.eval_bleu = eval_bleu
+        self.sample_from_distribution = sample_from_distribution
         if self.expert_action_chosen:
             self.uniform_sampling = False
         else:
@@ -515,23 +521,25 @@ class Aggrevate(FairseqCriterion):
         else:  # don't get student's best action if only random uniform sampling is done
             if self.sample_action_prob < 1:
                 student_sample["net_input"]["prev_output_tokens"] = hypos_up_to_t.to(self.device)
-                model_output = model.get_normalized_probs(model(**student_sample["net_input"]), log_probs=True).argmax(
-                    dim=-1)
+                model_output_probs = model.get_normalized_probs(model(**student_sample["net_input"]), log_probs=True)
+                model_output = model_output_probs.argmax(dim=-1)
         ats = []
         for i, hypo in enumerate(hypos_in):
             if action_sampling_mask[i]:
                 a_t = (self.random_action_distribution.sample() + 3).to(self.device)  # not eos (2), pad (1), unk (3)
             elif self.expert_action_chosen:
                 a_t = expert_output[i][indices[i]]
+            elif self.sample_from_distribution:
+                a_t = torch.distributions.Categorical(probs=model_output_probs).sample()
             else:
                 a_t = model_output[i][indices[i]]
             if not isinstance(hypo, torch.Tensor):
                 hypo = torch.tensor(hypo, device=self.device)
-            # hypo_including_t.append(torch.cat((hypo[:-1], a_t.unsqueeze(dim=0)), dim=0))        # remove eos pad again, otherwise expert output = prefix
-            if hypo.shape[0] > 1:
-                hypo_including_t.append(torch.cat((hypo[:-1], a_t.unsqueeze(dim=0)), dim=0))
-            else:  # one element tensor
-                hypo_including_t.append(torch.cat((hypo, a_t.unsqueeze(dim=0)), dim=0))
+            hypo_including_t.append(torch.cat((hypo[:-1], a_t.unsqueeze(dim=0)), dim=0))        # remove eos pad again, otherwise expert output = prefix
+            # if hypo.shape[0] > 1:
+                # hypo_including_t.append(torch.cat((hypo[:-1], a_t.unsqueeze(dim=0)), dim=0))
+            # else:  # one element tensor
+                # hypo_including_t.append(torch.cat((hypo, a_t.unsqueeze(dim=0)), dim=0))
             ats.append(a_t)
         hypos_to_t = collate_tokens(
             hypo_including_t,
@@ -638,5 +646,6 @@ class Aggrevate(FairseqCriterion):
         rtg = self.calculate_bleu(targets, expert_output_samples)
         r_e = torch.tensor([score / 100 for score in rtg], device=self.device)
         indicator = [r_e > q_t_T][0]
-        actions, bleu_diff, indicator = get_loss_components(net_output, rtg, indices, qt, ats)
+        # actions, bleu_diff, indicator = get_loss_components(net_output, rtg, indices, qt, ats)
+        actions, bleu_diff, _ = get_loss_components(net_output, rtg, indices, qt, ats)
         return bleu_diff, actions, indicator, q_t_T, torch.tensor([score/100 for score in rtg], device=self.device)
