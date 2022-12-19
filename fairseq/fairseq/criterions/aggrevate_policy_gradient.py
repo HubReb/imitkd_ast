@@ -524,9 +524,11 @@ class Aggrevate(FairseqCriterion):
                 model_output_probs = model.get_normalized_probs(model(**student_sample["net_input"]), log_probs=True)
                 model_output = model_output_probs.argmax(dim=-1)
         ats = []
+
+        a_ts_sampled = torch.distributions.Categorical(logits=model_output_probs).sample()
         for i, hypo in enumerate(hypos_in):
             if self.sample_from_distribution:
-                a_t = torch.distributions.Categorical(probs=model_output_probs[i][indices[i]]).sample()
+                a_t = a_ts_sampled[i][indices[i]]
             elif action_sampling_mask[i]:
                 a_t = (self.random_action_distribution.sample() + 3).to(self.device)  # not eos (2), pad (1), unk (3)
             elif self.expert_action_chosen:
