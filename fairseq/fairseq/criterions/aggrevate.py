@@ -708,6 +708,6 @@ class Aggrevate(FairseqCriterion):
             q_t_T = self.calculate_bleu(targets, complete_student_hypo)
             q_t_T = torch.tensor([score / 100 for score in q_t_T], device=self.device)
             indicator = [r_e > q_t_T][0]
-            qts, bleu_diff, _ = get_loss_components(net_output, rtg, indices, qt, ats,complete_output_model)
+            qts, bleu_diff, _ = get_loss_components(net_output, rtg, indices, qt, ats, complete_output_model)
         else:
-            qts, bleu_diff, indicator = get_loss_components(net_output, rtg, indices, qt, ats,complete_output_model)
+            qts, bleu_diff, indicator = get_loss_components(net_output, rtg, indices, qt, ats, complete_output_model)
