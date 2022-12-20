@@ -77,6 +77,11 @@ class AggrevateConfig(FairseqDataclass):
                     "use 'space' to disable detokenization; see fairseq.data.encoders for other options"
         },
     )
+    sample_from_distribution: bool = field(
+        default=False,
+        metadata={"help": "sample from model distribution for each time step"}
+    )
+
 
 
 def valid_loss(lprobs, target, sample, model, tgt_dict, eval_bleu=False, ignore_index=None, reduce=True,
@@ -149,24 +154,36 @@ def loss_calculation(bleu_diff, rs_student, indicator):
     bleu_diff = bleu_diff.view(-1, 1)
     indicator = indicator.view(-1, 1)
     loss = (indicator * (rs_student - bleu_diff) ** 2).sum()
+    #print(rs_student.mean())
     return loss, bleu_diff.sum(), rs_student.sum(), indicator.sum()
 
 
-def get_loss_components(net_output, expert_reward_to_go, indices, current_reward, ats):
+def get_loss_components(net_output, expert_reward_to_go, indices, current_reward, ats, complete_output_model):
     rse = []
-    max_value = torch.max(net_output[0])
+    # listMax = torch.max(net_output[0]) - torch.min(net_output[0])
+    # alist = (net_output[0] - torch.min(net_output[0])) / listMax
+    #listMax = torch.max(complete_output_model) - torch.min(complete_output_model)
+    #alist = (net_output[0] - torch.min(complete_output_model)) / listMax
+    # alist = alist / (1 + torch.exp(-alist))
     min_value = torch.min(net_output[0])
+    max_value = torch.max(net_output[0])
+    # scaled_net_output = alist
     for i, tensor in enumerate(net_output[0]):
-        # why 8? -> works better; only rough mapping required
-        #max_value = torch.max(tensor[indices[i]])
-        #print(max_value)
-        #min_value = torch.min(tensor[indices[i]])
-        #print(min_value)
+        # listMax = torch.max(tensor[indices[i]]) - torch.min(tensor[indices[i]])
+        # alist = (tensor[indices[i]] - torch.min(tensor[indices[i]])) / listMax
+        # alist = alist / (1 + torch.exp(-alist))
+        min_value = torch.min(tensor[indices[i]])
+        max_value = torch.max(tensor[indices[i]])
         scaled_tensor = 1 / (1 + torch.exp(
-            -8 * (2 * tensor[indices[i], ats[i]] - abs(min_value + max_value)) / abs(min_value - max_value)))
-        # might go back to torch.sigmoid() and scaling input
+            -4 * (
+                tensor[indices[i], ats[i]] - abs(max_value + min_value)/2
+                ) / (max_value - min_value)
+            )
+         )
+        # scaled_tensor = alist[ats[i]]
         rse.append(scaled_tensor)
         #print(scaled_tensor)
+        # print(torch.min(net_output[0]), torch.max(net_output[0]), net_output[0][i][indices[i], ats[i]], scaled_tensor)
     rse = torch.stack(rse, dim=0)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     # BLEU values calculated by sacrebleu/BleuScorer are between 0 and 100
@@ -192,6 +209,7 @@ class Aggrevate(FairseqCriterion):
             expert_action_chosen,
             sample_action_prob,
             eval_bleu,
+            sample_from_distribution,
             eval_bleu_detok,
             ignore_prefix_size=0,
             report_accuracy=False,
@@ -203,6 +221,7 @@ class Aggrevate(FairseqCriterion):
         self.expert = self.expert[-1]
         self.expert_vocab_src = Dictionary.load(expert_vocab_src)
         self.expert_vocab_tgt = Dictionary.load(expert_vocab_tgt)
+        self.sample_from_distribution = sample_from_distribution
         self.expert.requires_grad = False
         self.dict = task.tgt_dict
         self.eos = self.dict.eos()
@@ -313,13 +332,14 @@ class Aggrevate(FairseqCriterion):
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
             nll_loss, logged_bleu = valid_loss(lprobs, target, sample, model, self.expert_vocab_tgt, self.eval_bleu,
                                                self.ignore_prefix_size, reduce=reduce, tokenizer=self.tokenizer)
-            expert_input, indices, ats, hypos_up_to_t = self.get_student_predictions_and_pass_to_expert(model, sample, source_text)
+            expert_input, indices, ats, hypos_up_to_t, complete_output_model= self.get_student_predictions_and_pass_to_expert(model, sample, source_text)
             expert_output_samples = self.get_expert_output(sample, source_text, expert_input)
             bleu_diff, student_log, indicator, complete_student_bleu, complete_expert_bleu = self.calculate_rewards(sample, model,
                                                                                               expert_output_samples,
                                                                                               hypos_up_to_t,
                                                                                               expert_input, indices,
-                                                                                              ats)
+                                                                                              ats,
+                                                                                              complete_output_model)
             loss, bleu_diff_log, student_log, indicator = loss_calculation(
                 bleu_diff, student_log, indicator
             )
@@ -327,14 +347,14 @@ class Aggrevate(FairseqCriterion):
         else:
             with torch.no_grad():
                 source_text, _ = self.transform_source_tokens_into_expert_voc(sample)
-                expert_input, indices, ats, hypos_up_to_t = self.get_student_predictions_and_pass_to_expert(model, sample, source_text)
+                expert_input, indices, ats, hypos_up_to_t, complete_output_model = self.get_student_predictions_and_pass_to_expert(model, sample, source_text)
                 expert_output_samples = self.get_expert_output(sample, source_text, expert_input)
             model.train()  # call to SequenceGenerator sets model to eval mode, set model back to train
             bleu_diff, student_log, indicator, complete_student_bleu, complete_expert_bleu = self.calculate_rewards(sample, model,
                                                                                               expert_output_samples,
                                                                                               hypos_up_to_t,
                                                                                               expert_input, indices,
-                                                                                              ats)
+                                                                                              ats, complete_output_model)
             loss, bleu_diff_log, student_log, indicator = loss_calculation(
                 bleu_diff, student_log, indicator
             )
@@ -474,7 +494,10 @@ class Aggrevate(FairseqCriterion):
             # self._scorer.score(utils.strip_pad(target[i, :], self.padding_idx).cpu()  , hypo[0]['tokens'].int().cpu(), order=self.bleu_ngramms)
 
             ### decreases training time by ca. 1/3, not as precise but works just as good -> useful despite drawbacks ###
-            bleu_scores.append(self.score(ref, hypo[0]['tokens'].int().cpu()))
+            if not hypo[0]['tokens'].numel():
+                bleu_scores.append(0)
+            else:
+                bleu_scores.append(self.score(ref, hypo[0]['tokens'].int().cpu()))
             # bleu_scores.append(bleu.score)
         return bleu_scores
 
@@ -495,14 +518,24 @@ class Aggrevate(FairseqCriterion):
         hypos = student_generator._generate(student_sample)
         indices = []
         eos_pad = torch.tensor([self.eos], device=self.device)
+        complete_hypos = []
         for i, h in enumerate(hypos):
             index = torch.distributions.Categorical(
-                probs=torch.tensor([1.0 for _ in range(h[0]["tokens"].shape[0])])).sample().to(self.device)
+                probs=torch.tensor([1.0  for t in range(h[0]["tokens"].shape[0])])
+            ).sample().to(self.device)
             indices.append(index)
             hypos_in[i] = torch.cat((h[0]["tokens"][:index], eos_pad),
                                     dim=0)  # eos has to be first if tensor is passed as prev_output_token
+            complete_hypos.append(h[0]["tokens"])
         hypos_up_to_t = collate_tokens(
             hypos_in,
+            self.expert_vocab_src.pad(),
+            self.expert_vocab_src.eos(),
+            left_pad=False,
+            move_eos_to_beginning=True
+        )
+        complete_hypos = collate_tokens(
+            complete_hypos,
             self.expert_vocab_src.pad(),
             self.expert_vocab_src.eos(),
             left_pad=False,
@@ -515,35 +548,40 @@ class Aggrevate(FairseqCriterion):
                 "net_input": {
                     "src_tokens": source_text.to(self.device),
                     "src_lengths": [len(text) for text in source_text],
-                    "prev_output_tokens": hypos_up_to_t.to(self.device)(),
+                    "prev_output_tokens": hypos_up_to_t.to(self.device),
                 },
                 "target": sample["target"],
-                "target_lengths": sample["target_lengths"],
                 "ntokens": sample["ntokens"],
                 "nsentences": sample["nsentences"],
             }
             expert_output = self.expert.get_normalized_probs(self.expert(**out["net_input"]),
                                                              log_probs=True).argmax(dim=-1)
         else:  # don't get student's best action if only random uniform sampling is done
-            if self.sample_action_prob < 1:
+            if self.sample_action_prob < 1 or self.sample_from_distribution:
                 student_sample["net_input"]["prev_output_tokens"] = hypos_up_to_t.to(self.device)
                 model_output = model.get_normalized_probs(model(**student_sample["net_input"]), log_probs=True).argmax(
                     dim=-1)
+        student_sample["net_input"]["prev_output_tokens"] = complete_hypos.to(self.device)
+        complete_output_model, _ = model(**student_sample["net_input"])
         ats = []
+        if self.sample_from_distribution:
+            a_ts_sampled = torch.distributions.Categorical(logits=model_output_probs).sample()
         for i, hypo in enumerate(hypos_in):
-            if action_sampling_mask[i]:
-                a_t = (self.random_action_distribution.sample() + 3).to(self.device)  # not eos (2), pad (1), unk (3)
+            if self.sample_from_distribution:
+                a_t = a_ts_sampled[i][indices[i]]
+            elif action_sampling_mask[i]:
+                a_t = (self.random_action_distribution.sample()).to(self.device)
             elif self.expert_action_chosen:
                 a_t = expert_output[i][indices[i]]
             else:
                 a_t = model_output[i][indices[i]]
             if not isinstance(hypo, torch.Tensor):
                 hypo = torch.tensor(hypo, device=self.device)
-            # hypo_including_t.append(torch.cat((hypo[:-1], a_t.unsqueeze(dim=0)), dim=0))        # remove eos pad again, otherwise expert output = prefix
-            if hypo.shape[0] > 1:
-                hypo_including_t.append(torch.cat((hypo[:-1], a_t.unsqueeze(dim=0)), dim=0))
-            else:  # one element tensor
-                hypo_including_t.append(torch.cat((hypo, a_t.unsqueeze(dim=0)), dim=0))
+            hypo_including_t.append(torch.cat((hypo[:-1], a_t.unsqueeze(dim=0)), dim=0))        # remove eos pad again, otherwise expert output = prefix
+            # if hypo.shape[0] > 1:
+                # hypo_including_t.append(torch.cat((hypo[:-1], a_t.unsqueeze(dim=0)), dim=0))
+            # else:  # one element tensor
+                # hypo_including_t.append(torch.cat((hypo, a_t.unsqueeze(dim=0)), dim=0))
             ats.append(a_t)
         hypos_to_t = collate_tokens(
             hypo_including_t,
@@ -552,7 +590,7 @@ class Aggrevate(FairseqCriterion):
             left_pad=False,
             move_eos_to_beginning=False
         )
-        return hypos_to_t, indices, ats, hypos_up_to_t
+        return hypos_to_t, indices, ats, hypos_up_to_t, complete_output_model
 
     def transform_source_tokens_into_expert_voc(
             self,
@@ -623,9 +661,9 @@ class Aggrevate(FairseqCriterion):
         )
         return expert_output
 
-    def calculate_rewards(self, sample, model, expert_output_samples, hypos_up_to_t, hypos_to_t, indices, ats):
-        sample["net_input"]["prev_output_tokens"] = hypos_up_to_t
+    def calculate_rewards(self, sample, model, expert_output_samples, hypos_up_to_t, hypos_to_t, indices, ats, complete_output_model):
         eos_pad = torch.tensor([self.dict.eos() for _ in range(hypos_up_to_t.shape[0])], device=self.device).view(-1, 1)
+        sample["net_input"]["prev_output_tokens"] = hypos_up_to_t
         sample["net_input"].pop("src_text", None)
         net_output = model(**sample["net_input"])
         sample["net_input"]["prev_output_tokens"] = torch.cat((eos_pad, hypos_to_t), dim=1).to(self.device)
@@ -648,6 +686,6 @@ class Aggrevate(FairseqCriterion):
         q_t_T = torch.tensor([score / 100 for score in q_t_T], device=self.device)
         rtg = self.calculate_bleu(targets, expert_output_samples)
         r_e = torch.tensor([score / 100 for score in rtg], device=self.device)
-        #indicator = [r_e > q_t_T][0]
-        qts, bleu_diff, indicator = get_loss_components(net_output, rtg, indices, qt, ats)
+        indicator = [r_e > q_t_T][0]
+        qts, bleu_diff, _ = get_loss_components(net_output, rtg, indices, qt, ats,complete_output_model)
         return bleu_diff, qts, indicator, q_t_T, torch.tensor([score/100 for score in rtg], device=self.device)
