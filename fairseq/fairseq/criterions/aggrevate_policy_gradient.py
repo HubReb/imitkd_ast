@@ -468,7 +468,10 @@ class Aggrevate(FairseqCriterion):
             # self._scorer.score(utils.strip_pad(target[i, :], self.padding_idx).cpu()  , hypo[0]['tokens'].int().cpu(), order=self.bleu_ngramms)
 
             ### decreases training time by ca. 1/3, not as precise but works just as good -> useful despite drawbacks ###
-            bleu_scores.append(self.score(ref, hypo[0]['tokens'].int().cpu()))
+            if not hypo[0]['tokens'].numel():       # we sampled pad() as action and sampled t=0 - no BLEU score calculation possible
+             bleu_scores.append(0)
+            else:
+                bleu_scores.append(self.score(ref, hypo[0]['tokens'].int().cpu()))
             # bleu_scores.append(bleu.score)
         return bleu_scores
 
@@ -530,7 +533,7 @@ class Aggrevate(FairseqCriterion):
             if self.sample_from_distribution:
                 a_t = a_ts_sampled[i][indices[i]]
             elif action_sampling_mask[i]:
-                a_t = (self.random_action_distribution.sample() + 3).to(self.device)  # not eos (2), pad (1), unk (3)
+                a_t = (self.random_action_distribution.sample()).to(self.device)
             elif self.expert_action_chosen:
                 a_t = expert_output[i][indices[i]]
             else:
@@ -647,7 +650,7 @@ class Aggrevate(FairseqCriterion):
         q_t_T = torch.tensor([score / 100 for score in q_t_T], device=self.device)
         rtg = self.calculate_bleu(targets, expert_output_samples)
         r_e = torch.tensor([score / 100 for score in rtg], device=self.device)
-        indicator = [r_e > q_t_T][0]
-        # actions, bleu_diff, indicator = get_loss_components(net_output, rtg, indices, qt, ats)
-        actions, bleu_diff, _ = get_loss_components(net_output, rtg, indices, qt, ats)
+        # indicator = [r_e > q_t_T][0]
+        actions, bleu_diff, indicator = get_loss_components(net_output, rtg, indices, qt, ats)
+        # actions, bleu_diff, _ = get_loss_components(net_output, rtg, indices, qt, ats)
         return bleu_diff, actions, indicator, q_t_T, torch.tensor([score/100 for score in rtg], device=self.device)
