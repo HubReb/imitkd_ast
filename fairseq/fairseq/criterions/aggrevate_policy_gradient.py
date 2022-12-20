@@ -527,8 +527,8 @@ class Aggrevate(FairseqCriterion):
                 model_output_probs = model.get_normalized_probs(model(**student_sample["net_input"]), log_probs=True)
                 model_output = model_output_probs.argmax(dim=-1)
         ats = []
-
-        a_ts_sampled = torch.distributions.Categorical(logits=model_output_probs).sample()
+        if self.sample_from_distribution:
+            a_ts_sampled = torch.distributions.Categorical(logits=model_output_probs).sample()
         for i, hypo in enumerate(hypos_in):
             if self.sample_from_distribution:
                 a_t = a_ts_sampled[i][indices[i]]
