@@ -81,6 +81,12 @@ class AggrevateConfig(FairseqDataclass):
         default=False,
         metadata={"help": "sample from model distribution for each time step"}
     )
+    indicator_student_expert: bool = field(
+        default=False,
+        metadata={"help": "replace indicator = [BLEU(y_{t+1}^{expert}) > BLEU(y_{<t} + a_t)] with BLEU(y_{<t} + a_t + y_{t+1}^{expert}) > BLEU(y_{<t} + a_t + y_{t+1}^{student}"}
+    )
+
+
 
 
 
@@ -206,6 +212,7 @@ class Aggrevate(FairseqCriterion):
             expert_vocab_tgt,
             path,
             bpe_codes,
+            indicator_student_expert,
             expert_action_chosen,
             sample_action_prob,
             eval_bleu,
@@ -219,6 +226,7 @@ class Aggrevate(FairseqCriterion):
         self.report_accuracy = report_accuracy
         self.expert, _ = load_model_ensemble([expert], arg_overrides={"data": path})
         self.expert = self.expert[-1]
+        self.complete_indicator = indicator_student_expert
         self.expert_vocab_src = Dictionary.load(expert_vocab_src)
         self.expert_vocab_tgt = Dictionary.load(expert_vocab_tgt)
         self.sample_from_distribution = sample_from_distribution
@@ -686,6 +694,20 @@ class Aggrevate(FairseqCriterion):
         q_t_T = torch.tensor([score / 100 for score in q_t_T], device=self.device)
         rtg = self.calculate_bleu(targets, expert_output_samples)
         r_e = torch.tensor([score / 100 for score in rtg], device=self.device)
-        indicator = [r_e > q_t_T][0]
-        qts, bleu_diff, _ = get_loss_components(net_output, rtg, indices, qt, ats,complete_output_model)
-        return bleu_diff, qts, indicator, q_t_T, torch.tensor([score/100 for score in rtg], device=self.device)
+        if self.complete_indicator:
+            student_generator = SequenceGenerator(
+                [model],
+                self.dict,
+                beam_size=1
+            )
+            complete_student_hypo = student_generator.generate(
+                [model],
+                sample,
+                prefix_tokens=hypos_to_t.to(self.device)
+            )
+            q_t_T = self.calculate_bleu(targets, complete_student_hypo)
+            q_t_T = torch.tensor([score / 100 for score in q_t_T], device=self.device)
+            indicator = [r_e > q_t_T][0]
+            qts, bleu_diff, _ = get_loss_components(net_output, rtg, indices, qt, ats,complete_output_model)
+        else:
+            qts, bleu_diff, indicator = get_loss_components(net_output, rtg, indices, qt, ats,complete_output_model)

@@ -81,6 +81,12 @@ class AggrevateConfig(FairseqDataclass):
                     "use 'space' to disable detokenization; see fairseq.data.encoders for other options"
         },
     )
+    indicator_student_expert: bool = field(
+        default=False,
+        metadata={"help": "replace indicator = [BLEU(y_{t+1}^{expert}) > BLEU(y_{<t} + a_t)] with BLEU(y_{<t} + a_t + y_{t+1}^{expert}) > BLEU(y_{<t} + a_t + y_{t+1}^{student}"}
+    )
+
+
 
 
 def valid_loss(lprobs, target, sample, model, tgt_dict, eval_bleu=False, ignore_index=None, reduce=True,
@@ -182,6 +188,7 @@ class Aggrevate(FairseqCriterion):
             expert_vocab_src,
             expert_vocab_tgt,
             path,
+            indicator_student_expert,
             bpe_codes,
             expert_action_chosen,
             sample_action_prob,
@@ -201,6 +208,7 @@ class Aggrevate(FairseqCriterion):
         self.expert.requires_grad = False
         self.dict = task.tgt_dict
         self.eos = self.dict.eos()
+        self.complete_indicator = indicator_student_expert
         self.bpe = fastBPE.fastBPE(bpe_codes, expert_vocab_tgt)
         self.sentence_avg = True
         self.expert_action_chosen = expert_action_chosen
@@ -635,22 +643,25 @@ class Aggrevate(FairseqCriterion):
         # avoid rewriting calculate_bleu method
         student_hypos = [[{"tokens": utils.strip_pad(hypo, self.dict.pad())}] for hypo in
                          hypos_to_t.cpu()]
-        student_generator = SequenceGenerator(
-            [model],
-            self.dict,
-            beam_size=1
-        )
-        complete_student_hypo = student_generator.generate(
-            [model],
-            sample,
-            prefix_tokens=hypos_to_t.to(self.device)
-        )
+
         qt = self.calculate_bleu(targets, student_hypos)
-        q_t_T = self.calculate_bleu(targets, complete_student_hypo)
-        q_t_T = torch.tensor([score / 100 for score in q_t_T], device=self.device)
         rtg = self.calculate_bleu(targets, expert_output_samples)
         r_e = torch.tensor([score / 100 for score in rtg], device=self.device)
-        # indicator = [r_e > q_t_T][0]
-        actions, bleu_diff, indicator = get_loss_components(net_output, rtg, indices, qt, ats)
-        # actions, bleu_diff, _ = get_loss_components(net_output, rtg, indices, qt, ats)
+        if self.complete_indicator:
+            student_generator = SequenceGenerator(
+                [model],
+                self.dict,
+                beam_size=1
+            )
+            complete_student_hypo = student_generator.generate(
+                [model],
+                sample,
+                prefix_tokens=hypos_to_t.to(self.device)
+            )
+            q_t_T = self.calculate_bleu(targets, complete_student_hypo)
+            q_t_T = torch.tensor([score / 100 for score in q_t_T], device=self.device)
+            indicator = [r_e > q_t_T][0]
+            qts, bleu_diff, _ = get_loss_components(net_output, rtg, indices, qt, ats,complete_output_model)
+        else:
+            qts, bleu_diff, indicator = get_loss_components(net_output, rtg, indices, qt, ats,complete_output_model)
         return bleu_diff, actions, indicator, q_t_T, torch.tensor([score/100 for score in rtg], device=self.device)
