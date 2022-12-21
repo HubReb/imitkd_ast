@@ -85,7 +85,10 @@ class AggrevateConfig(FairseqDataclass):
         default=False,
         metadata={"help": "replace indicator = [BLEU(y_{t+1}^{expert}) > BLEU(y_{<t} + a_t)] with BLEU(y_{<t} + a_t + y_{t+1}^{expert}) > BLEU(y_{<t} + a_t + y_{t+1}^{student}"}
     )
-
+    ter: bool = field(
+        default=False,
+        metadata={"help": "calculate reward-to-go with (1 - TER) instead of BLEU"}
+    )
 
 
 def valid_loss(lprobs, target, sample, model, tgt_dict, eval_bleu=False, ignore_index=None, reduce=True,
@@ -161,7 +164,7 @@ def loss_calculation(bleu_diff, student_actions, indicator):
     return loss, bleu_diff.sum(), indicator.sum()
 
 
-def get_loss_components(net_output, expert_reward_to_go, indices, current_reward, ats):
+def get_loss_components(net_output, expert_reward_to_go, indices, current_reward, ats, metric_bleu):
     rse = []
     for i, tensor in enumerate(net_output):
         action_tensor = tensor[indices[i], ats[i]]
@@ -169,8 +172,12 @@ def get_loss_components(net_output, expert_reward_to_go, indices, current_reward
     actions = torch.stack(rse, dim=0)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     # BLEU values calculated by sacrebleu/BleuScorer are between 0 and 100
-    r_e = torch.tensor([score / 100 for score in expert_reward_to_go], device=device)
-    r_s_b = torch.tensor([score / 100 for score in current_reward], device=device)
+    if metric_bleu:
+        r_e = torch.tensor([score / 100 for score in expert_reward_to_go], device=device)
+        r_s_b = torch.tensor([score / 100 for score in current_reward], device=device)
+    else:
+        r_e = torch.tensor(expert_reward_to_go, device=device)
+        r_s_b = torch.tensor(current_reward, device=device)
     indicator = [r_e > r_s_b][0]
     bleu_diff = r_e - r_s_b
     return actions, bleu_diff, indicator
@@ -194,6 +201,7 @@ class Aggrevate(FairseqCriterion):
             eval_bleu,
             eval_bleu_detok,
             sample_from_distribution,
+            ter,
             ignore_prefix_size=0,
             report_accuracy=False,
     ):
@@ -212,6 +220,11 @@ class Aggrevate(FairseqCriterion):
         self.sentence_avg = True
         self.expert_action_chosen = expert_action_chosen
         self.eval_bleu = eval_bleu
+        self.metric_ter = ter
+        if self.metric_ter:
+            self.metric_bleu = False
+        else:
+            self.metric_bleu = True
         self.sample_from_distribution = sample_from_distribution
         if self.expert_action_chosen:
             self.uniform_sampling = False
@@ -220,8 +233,7 @@ class Aggrevate(FairseqCriterion):
             assert sample_action_prob > 0
         if not self.expert_action_chosen:
             self.random_action_distribution = torch.distributions.Categorical(
-                probs=torch.tensor([1.0 for a in self.dict.indices.values() if
-                                    a != self.dict.pad() and a != self.dict.eos() and a != self.dict.unk()])
+                probs=torch.tensor([1.0 for a in self.dict.indices.values()])
             )
         self.sample_action_prob = sample_action_prob
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -260,35 +272,60 @@ class Aggrevate(FairseqCriterion):
         # -> hack2 to avoid breaking hack1
         if valid:
             nll_loss, loss, logged_bleu, bleu_diff, student_actions, indicator_sum, bleu_for_complete_student_hypos, bleu_for_complete_expert = self.compute_loss(model, net_output, sample, reduce=reduce, valid=valid)
-            logging_output = {
-                "loss": loss.data,
-                "nll_loss": nll_loss.data,
-                "ntokens": sample["ntokens"],
-                "nsentences": sample["target"].size(0),
-                "sample_size": sample["ntokens"],
-                "bleu": logged_bleu,
-                "indicator_sum": indicator_sum,
-                "bleu_diff": bleu_diff.data,
-                "bleu_complete_student_continuation": bleu_for_complete_student_hypos.data,
-                "bleu_complete_expert_continuation": bleu_for_complete_expert.data
-
-            }
+            if self.metric_bleu:
+                logging_output = {
+                    "loss": loss.data,
+                    "nll_loss": nll_loss.data,
+                    "ntokens": sample["ntokens"],
+                    "nsentences": sample["target"].size(0),
+                    "sample_size": sample["ntokens"],
+                    "bleu": logged_bleu,
+                    "indicator_sum": indicator_sum,
+                    "bleu_diff": bleu_diff.data,
+                    "bleu_complete_student_continuation": bleu_for_complete_student_hypos.data,
+                    "bleu_complete_expert_continuation": bleu_for_complete_expert.data
+                }
+            else:
+                logging_output = {
+                    "loss": loss.data,
+                    "nll_loss": nll_loss.data,
+                    "ntokens": sample["ntokens"],
+                    "nsentences": sample["target"].size(0),
+                    "sample_size": sample["ntokens"],
+                    "bleu": logged_bleu,
+                    "indicator_sum": indicator_sum,
+                    "ter_diff": bleu_diff.data,
+                    "ter_complete_student_continuation": bleu_for_complete_student_hypos.data,
+                    "ter_complete_expert_continuation": bleu_for_complete_expert.data
+                }
         else:
             loss, bleu_diff, student_actions, indicator_sum, bleu_for_complete_student_hypos, bleu_for_complete_expert = self.compute_loss(model,
                                                                                                              net_output,
                                                                                                              sample,
                                                                                                              reduce=reduce,
                                                                                                              valid=valid)
-            logging_output = {
-                "loss": loss.data,
-                "bleu_diff": bleu_diff.data,
-                "ntokens": sample["ntokens"],
-                "nsentences": sample["target"].size(0),
-                "sample_size": sample["ntokens"],
-                "indicator_sum": indicator_sum,
-                "bleu_complete_student_continuation": bleu_for_complete_student_hypos.data,
-                "bleu_complete_expert_continuation": bleu_for_complete_expert.data
-            }
+            if self.metric_bleu:
+                logging_output = {
+                    "loss": loss.data,
+                    "bleu_diff": bleu_diff.data,
+                    "ntokens": sample["ntokens"],
+                    "nsentences": sample["target"].size(0),
+                    "sample_size": sample["ntokens"],
+                    "indicator_sum": indicator_sum,
+                    "bleu_complete_student_continuation": bleu_for_complete_student_hypos.data,
+                    "bleu_complete_expert_continuation": bleu_for_complete_expert.data
+                }
+            else:
+                logging_output = {
+                    "loss": loss.data,
+                    "ter_diff": bleu_diff.data,
+                    "ntokens": sample["ntokens"],
+                    "nsentences": sample["target"].size(0),
+                    "sample_size": sample["ntokens"],
+                    "indicator_sum": indicator_sum,
+                    "ter_complete_student_continuation": bleu_for_complete_student_hypos.data,
+                    "ter_complete_expert_continuation": bleu_for_complete_expert.data
+                }
         if self.report_accuracy:
             n_correct, total = self.compute_accuracy(model, net_output, sample)
             logging_output["n_correct"] = utils.item(n_correct.data)
@@ -367,27 +404,53 @@ class Aggrevate(FairseqCriterion):
         indicator_sum = sum(log.get("indicator_sum", 0) for log in logging_outputs)
         bleu_student_complete = sum(log.get("bleu_complete_student_continuation", 0) for log in logging_outputs)
         bleu_expert_complete = sum(log.get("bleu_complete_expert_continuation", 0) for log in logging_outputs)
+        ter_diff = sum(log.get("ter_diff", 0) for log in logging_outputs)
+        indicator_sum = sum(log.get("indicator_sum", 0) for log in logging_outputs)
+        ter_student_complete = sum(log.get("ter_complete_student_continuation", 0) for log in logging_outputs)
+        ter_expert_complete = sum(log.get("ter_complete_expert_continuation", 0) for log in logging_outputs)
+
         metrics.log_scalar(
             "loss", loss_sum / nsentences, nsentences, round=3
         )
-        metrics.log_scalar(
-            "bleu_diff", bleu_diff / nsentences, nsentences, round=3
-        )
-        metrics.log_scalar(
-            "bleu_complete_student_continuation",  bleu_student_complete / nsentences, nsentences, round=3
-        )
-        metrics.log_scalar(
-            "bleu_complete_expert_continuation",  bleu_expert_complete / nsentences, nsentences, round=3
-        )
-        if indicator_sum > 0:
+        if "bleu_diff" in logging_outputs[0].keys():
             metrics.log_scalar(
-                "bleu_diff_no_zeros", bleu_diff / indicator_sum, nsentences, round=3
+                "bleu_diff", bleu_diff / nsentences, nsentences, round=3
             )
             metrics.log_scalar(
-                "bleu_complete_student_continuation_no_zeros", bleu_student_complete / indicator_sum, nsentences, round=3
+                "bleu_complete_student_continuation",  bleu_student_complete / nsentences, nsentences, round=3
             )
             metrics.log_scalar(
-                "bleu_complete_expert_continuation_no_zeros", bleu_expert_complete / indicator_sum, nsentences, round=3
+                "bleu_complete_expert_continuation",  bleu_expert_complete / nsentences, nsentences, round=3
+            )
+            if indicator_sum > 0:
+                metrics.log_scalar(
+                    "bleu diff_no_zeros", bleu_diff / indicator_sum, nsentences, round=3
+                )
+                metrics.log_scalar(
+                    "bleu complete_student_continuation_no_zeros", bleu_student_complete / indicator_sum, nsentences, round=3
+                )
+                metrics.log_scalar(
+                    "bleu complete_expert_continuation_no_zeros", bleu_expert_complete / indicator_sum, nsentences, round=3
+            )
+        elif "ter_diff" in logging_outputs[0].keys():
+            metrics.log_scalar(
+                "1-ter: diff", ter_diff / nsentences, nsentences, round=3
+            )
+            metrics.log_scalar(
+                "1-ter: complete_student_continuation",  ter_student_complete / nsentences, nsentences, round=3
+            )
+            metrics.log_scalar(
+                "1-ter: complete_expert_continuation",  ter_expert_complete / nsentences, nsentences, round=3
+            )
+            if indicator_sum > 0:
+                metrics.log_scalar(
+                    "1-ter: diff_no_zeros", ter_diff / indicator_sum, nsentences, round=3
+                )
+                metrics.log_scalar(
+                    "1-ter: complete_student_continuation_no_zeros", ter_student_complete / indicator_sum, nsentences, round=3
+                )
+                metrics.log_scalar(
+                    "1-ter: complete_expert_continuation_no_zeros", ter_expert_complete / indicator_sum, nsentences, round=3
             )
         metrics.log_scalar(
             "indicator_percentage", indicator_sum / nsentences, nsentences, round=3
@@ -467,20 +530,34 @@ class Aggrevate(FairseqCriterion):
         for i, hypo in enumerate(hypos):
             ref = utils.strip_pad(target[i, :], self.padding_idx).cpu()
             ### slow  - not happy with this###
-            # ref = self.tokenizer.decode(self.dict.string(utils.strip_pad(target[i, :], self.padding_idx).cpu(), unk_string="UNKNOWNTOKENINREF",
-            #       bpe_symbol="fastBPE"))
+            ref = self.tokenizer.decode(self.dict.string(utils.strip_pad(target[i, :], self.padding_idx).cpu(), unk_string="UNKNOWNTOKENINREF",
+                  bpe_symbol="fastBPE"))
             # only top scoring hypothesis is considered
-            # hyp = self.tokenizer.decode(self.dict.string(hypo[0]["tokens"].int().cpu(), unk_string="UNKNOWNTOKENINHYP", bpe_symbol="fastBPE"))
-            # bleu = sacrebleu.sentence_bleu(hyp, [ref], smooth_method="floor", smooth_value=0.1)     # not smoothing sets BLEU too low, smoothing exp. sets it far too high
+            hyp = self.tokenizer.decode(self.dict.string(hypo[0]["tokens"].int().cpu(), unk_string="UNKNOWNTOKENINHYP", bpe_symbol="fastBPE"))
+            bleu = sacrebleu.sentence_bleu(hyp, [ref], smooth_method="floor", smooth_value=0.1)     # not smoothing sets BLEU too low, smoothing exp. sets it far too high
             # self._scorer.score(utils.strip_pad(target[i, :], self.padding_idx).cpu()  , hypo[0]['tokens'].int().cpu(), order=self.bleu_ngramms)
 
             ### decreases training time by ca. 1/3, not as precise but works just as good -> useful despite drawbacks ###
-            if not hypo[0]['tokens'].numel():       # we sampled pad() as action and sampled t=0 - no BLEU score calculation possible
-                 bleu_scores.append(0)
-            else:
-                bleu_scores.append(self.score(ref, hypo[0]['tokens'].int().cpu()))
-            # bleu_scores.append(bleu.score)
+            # if not hypo[0]['tokens'].numel():       # we sampled pad() as action and sampled t=0 - no BLEU score calculation possible
+                 # bleu_scores.append(0)
+            # else:
+                # bleu_scores.append(self.score(ref, hypo[0]['tokens'].int().cpu()))
+            bleu_scores.append(bleu.score)
         return bleu_scores
+
+    def calculate_inverse_ter(self, target, hypos):
+        ter_scores = []
+        from sacrebleu.metrics import TER
+        for i, hypo in enumerate(hypos):
+            ### slow  - not happy with this###
+            ref = self.tokenizer.decode(self.dict.string(utils.strip_pad(target[i, :], self.padding_idx).cpu(), unk_string="UNKNOWNTOKENINREF",
+                  bpe_symbol="fastBPE"))
+            # only top scoring hypothesis is considered
+            hyp = self.tokenizer.decode(self.dict.string(hypo[0]["tokens"].int().cpu(), unk_string="UNKNOWNTOKENINHYP", bpe_symbol="fastBPE"))
+            ter_score = sacrebleu.sentence_ter(hyp, [ref])
+
+            ter_scores.append(1 - ter_score.score)
+        return ter_scores
 
     def get_student_predictions_and_pass_to_expert(self, model, sample, source_text):
         hypo_including_t = []
@@ -653,15 +730,21 @@ class Aggrevate(FairseqCriterion):
             sample,
             prefix_tokens=hypos_to_t.to(self.device)
         )
-        qt = self.calculate_bleu(targets, student_hypos)
-        q_t_T = self.calculate_bleu(targets, complete_student_hypo)
-        q_t_T = torch.tensor([score / 100 for score in q_t_T], device=self.device)
-        rtg = self.calculate_bleu(targets, expert_output_samples)
-        r_e = torch.tensor([score / 100 for score in rtg], device=self.device)
+        if self.metric_bleu:
+            qt = self.calculate_bleu(targets, student_hypos)
+            q_t_T = self.calculate_bleu(targets, complete_student_hypo)
+            q_t_T = torch.tensor([score / 100 for score in q_t_T], device=self.device)
+            rtg = self.calculate_bleu(targets, expert_output_samples)
+            r_e = torch.tensor([score / 100 for score in rtg], device=self.device)
+        elif self.metric_ter:
+            qt = torch.tensor(self.calculate_inverse_ter(targets, student_hypos), device=self.device)
+            q_t_T = torch.tensor(self.calculate_inverse_ter(targets, complete_student_hypo), device=self.device)
+            rtg = self.calculate_inverse_ter(targets, expert_output_samples)
+            r_e = torch.tensor(rtg, device=self.device)
         if self.complete_indicator:
             indicator = [r_e > q_t_T][0]
-            actions_prob, bleu_diff, _ = get_loss_components(net_output, rtg, indices, qt, ats)
+            actions_prob, bleu_diff, _ = get_loss_components(net_output, rtg, indices, qt, ats, self.metric_bleu)
         else:
-            actions_prob, bleu_diff, indicator = get_loss_components(net_output, rtg, indices, qt, ats)
+            actions_prob, bleu_diff, indicator = get_loss_components(net_output, rtg, indices, qt, ats, self.metric_bleu)
         # actions, bleu_diff, _ = get_loss_components(net_output, rtg, indices, qt, ats)
-        return bleu_diff, actions_prob, indicator, q_t_T, torch.tensor([score/100 for score in rtg], device=self.device)
+        return bleu_diff, actions_prob, indicator, q_t_T, r_e
