@@ -88,7 +88,6 @@ class AggrevateConfig(FairseqDataclass):
 
 
 
-
 def valid_loss(lprobs, target, sample, model, tgt_dict, eval_bleu=False, ignore_index=None, reduce=True,
                tokenizer=None):
     if target.dim() == lprobs.dim() - 1:
@@ -188,8 +187,8 @@ class Aggrevate(FairseqCriterion):
             expert_vocab_src,
             expert_vocab_tgt,
             path,
-            indicator_student_expert,
             bpe_codes,
+            indicator_student_expert,
             expert_action_chosen,
             sample_action_prob,
             eval_bleu,
@@ -206,9 +205,9 @@ class Aggrevate(FairseqCriterion):
         self.expert_vocab_src = Dictionary.load(expert_vocab_src)
         self.expert_vocab_tgt = Dictionary.load(expert_vocab_tgt)
         self.expert.requires_grad = False
+        self.complete_indicator = indicator_student_expert
         self.dict = task.tgt_dict
         self.eos = self.dict.eos()
-        self.complete_indicator = indicator_student_expert
         self.bpe = fastBPE.fastBPE(bpe_codes, expert_vocab_tgt)
         self.sentence_avg = True
         self.expert_action_chosen = expert_action_chosen
@@ -317,16 +316,16 @@ class Aggrevate(FairseqCriterion):
                                                self.ignore_prefix_size, reduce=reduce, tokenizer=self.tokenizer)
             expert_input, indices, ats, hypos_up_to_t = self.get_student_predictions_and_pass_to_expert(model, sample, source_text)
             expert_output_samples = self.get_expert_output(sample, source_text, expert_input)
-            bleu_diff, student_actions, indicator, complete_student_bleu, complete_expert_bleu = self.calculate_rewards(
+            bleu_diff, student_actions_probs, indicator, complete_student_bleu, complete_expert_bleu = self.calculate_rewards(
                 sample, model,
                 expert_output_samples,
                 hypos_up_to_t,
                 expert_input, indices,
                 ats)
             loss, bleu_diff_log, indicator = loss_calculation(
-                bleu_diff, student_actions, indicator
+                bleu_diff, student_actions_probs, indicator
             )
-            return nll_loss, loss, logged_bleu, bleu_diff_log, student_actions, indicator, complete_student_bleu.sum(), complete_expert_bleu.sum()
+            return nll_loss, loss, logged_bleu, bleu_diff_log, student_actions_probs, indicator, complete_student_bleu.sum(), complete_expert_bleu.sum()
         else:
             with torch.no_grad():
                 source_text, _ = self.transform_source_tokens_into_expert_voc(sample)
@@ -335,16 +334,16 @@ class Aggrevate(FairseqCriterion):
                                                                                                             source_text)
                 expert_output_samples = self.get_expert_output(sample, source_text, expert_input)
             model.train()  # call to SequenceGenerator sets model to eval mode, set model back to train
-            bleu_diff, student_actions, indicator, complete_student_bleu, complete_expert_bleu = self.calculate_rewards(
+            bleu_diff, student_actions_probs, indicator, complete_student_bleu, complete_expert_bleu = self.calculate_rewards(
                 sample, model,
                 expert_output_samples,
                 hypos_up_to_t,
                 expert_input, indices,
                 ats)
             loss, bleu_diff_log, indicator = loss_calculation(
-                bleu_diff, student_actions, indicator
+                bleu_diff, student_actions_probs, indicator
             )
-        return loss, bleu_diff_log, student_actions, indicator, complete_student_bleu.sum(), complete_expert_bleu.sum()
+        return loss, bleu_diff_log, student_actions_probs, indicator, complete_student_bleu.sum(), complete_expert_bleu.sum()
 
     def compute_accuracy(self, model, net_output, sample):
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
@@ -477,7 +476,7 @@ class Aggrevate(FairseqCriterion):
 
             ### decreases training time by ca. 1/3, not as precise but works just as good -> useful despite drawbacks ###
             if not hypo[0]['tokens'].numel():       # we sampled pad() as action and sampled t=0 - no BLEU score calculation possible
-             bleu_scores.append(0)
+                 bleu_scores.append(0)
             else:
                 bleu_scores.append(self.score(ref, hypo[0]['tokens'].int().cpu()))
             # bleu_scores.append(bleu.score)
@@ -643,25 +642,26 @@ class Aggrevate(FairseqCriterion):
         # avoid rewriting calculate_bleu method
         student_hypos = [[{"tokens": utils.strip_pad(hypo, self.dict.pad())}] for hypo in
                          hypos_to_t.cpu()]
-
+        # TODO: SequenceGenerator sets model into eval() mode internally - fix it if regularization method dropout is ever used
+        student_generator = SequenceGenerator(
+            [model],
+            self.dict,
+            beam_size=1
+        )
+        complete_student_hypo = student_generator.generate(
+            [model],
+            sample,
+            prefix_tokens=hypos_to_t.to(self.device)
+        )
         qt = self.calculate_bleu(targets, student_hypos)
+        q_t_T = self.calculate_bleu(targets, complete_student_hypo)
+        q_t_T = torch.tensor([score / 100 for score in q_t_T], device=self.device)
         rtg = self.calculate_bleu(targets, expert_output_samples)
         r_e = torch.tensor([score / 100 for score in rtg], device=self.device)
         if self.complete_indicator:
-            student_generator = SequenceGenerator(
-                [model],
-                self.dict,
-                beam_size=1
-            )
-            complete_student_hypo = student_generator.generate(
-                [model],
-                sample,
-                prefix_tokens=hypos_to_t.to(self.device)
-            )
-            q_t_T = self.calculate_bleu(targets, complete_student_hypo)
-            q_t_T = torch.tensor([score / 100 for score in q_t_T], device=self.device)
             indicator = [r_e > q_t_T][0]
-            qts, bleu_diff, _ = get_loss_components(net_output, rtg, indices, qt, ats,complete_output_model)
+            actions_prob, bleu_diff, _ = get_loss_components(net_output, rtg, indices, qt, ats)
         else:
-            qts, bleu_diff, indicator = get_loss_components(net_output, rtg, indices, qt, ats,complete_output_model)
-        return bleu_diff, actions, indicator, q_t_T, torch.tensor([score/100 for score in rtg], device=self.device)
+            actions_prob, bleu_diff, indicator = get_loss_components(net_output, rtg, indices, qt, ats)
+        # actions, bleu_diff, _ = get_loss_components(net_output, rtg, indices, qt, ats)
+        return bleu_diff, actions_prob, indicator, q_t_T, torch.tensor([score/100 for score in rtg], device=self.device)
