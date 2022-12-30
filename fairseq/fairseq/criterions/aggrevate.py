@@ -187,7 +187,7 @@ def get_loss_components(net_output, expert_reward_to_go, indices, current_reward
         # max_value = torch.max(tensor[indices[i]])
         scaled_tensor = 1 / (1 + torch.exp(
             -4 * (
-                tensor[indices[i], ats[i]] - (max_value + min_value)/2
+                tensor[indices[i], ats[i]] - abs(max_value + min_value)/2
                 ) / (max_value - min_value)
             )
          )

@@ -26,6 +26,30 @@ from fairseq.sequence_generator import SequenceGenerator
 from fairseq.data import encoders
 from fairseq.criterions.helper_functions import collate_tokens
 
+try:
+    from comet import download_model, load_from_checkpoint
+except ModuleNotFoundError:
+    import logging
+    # mostly taken from https://docs.python.org/3/howto/logging.html#logging-basic-tutorial
+    # create logger
+    logger = logging.getLogger("Aggrevate_log")
+    logger.setLevel(logging.DEBUG)
+
+    # create console handler and set level to debug
+    ch = logging.FileHandler(filename="aggrevate_pg.log")
+    ch.setLevel(logging.DEBUG)
+
+    # create formatter
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    # add formatter to ch
+    ch.setFormatter(formatter)
+
+    # add ch to logger
+    logger.addHandler(ch)
+
+    logger.exception("COMET module is not installed! COMET is not available as a metric!")
+
 
 @dataclass
 class AggrevateConfig(FairseqDataclass):
@@ -70,6 +94,10 @@ class AggrevateConfig(FairseqDataclass):
         default=False,
         metadata={"help": "hack - pass flag if best checkpoint metric is bleu to compute BLEU score"}
     )
+    eval_comet: bool = field(
+        default=False,
+        metadata={"help": "hack - pass flag if best checkpoint metric is comet"}
+    )
     sample_from_distribution: bool = field(
         default=False,
         metadata={"help": "sample from model distribution for each time step"}
@@ -89,10 +117,13 @@ class AggrevateConfig(FairseqDataclass):
         default=False,
         metadata={"help": "calculate reward-to-go with (1 - TER) instead of BLEU"}
     )
+    comet: bool = field(
+        default=False,
+        metadata={"help": "calculate reward-to-go with comet2022 instead of BLEU"}
+    )
 
-
-def valid_loss(lprobs, target, sample, model, tgt_dict, eval_bleu=False, ignore_index=None, reduce=True,
-               tokenizer=None):
+def valid_loss(lprobs, target, sample, model, tgt_dict, source_dict=None, eval_bleu=False, ignore_index=None, reduce=True,
+               tokenizer=None, eval_comet=False, comet_calculation_model_path=None, source_text=None):
     if target.dim() == lprobs.dim() - 1:
         target = target.unsqueeze(-1)
     nll_loss = -lprobs.gather(dim=-1, index=target)
@@ -106,6 +137,31 @@ def valid_loss(lprobs, target, sample, model, tgt_dict, eval_bleu=False, ignore_
 
     # adapted from translation task
     logging_output = {}
+    if eval_comet:
+        sequence_generator = SequenceGenerator([model], tgt_dict, beam_size=5)
+        gen_out = sequence_generator.generate([model], sample, prefix_tokens=None)
+        comet_calculation_model = load_from_checkpoint(download_model("eamt22-cometinho-da"))
+        data = []
+        for i in range(len(gen_out)):
+            ref = tokenizer.decode(tgt_dict.string(utils.strip_pad(target[i, :], tgt_dict.pad()).cpu(), unk_string="UNKNOWNTOKENINREF",
+                  bpe_symbol="fastBPE"))
+            # only top scoring hypothesis is considered
+            hyp = tokenizer.decode(tgt_dict.string(gen_out[i][0]["tokens"].int().cpu(), unk_string="UNKNOWNTOKENINHYP", bpe_symbol="fastBPE"))
+            if isinstance(source_text[i], str):
+                src = tokenizer.decode(source_text[i])
+            else:
+                src = tokenizer.decode(source_dict.string(utils.strip_pad(source_text[i, :], tgt_dict.pad()).cpu() ,bpe_symbol="fastBPE"))
+            data_point = {
+                "src": src,
+                "mt": hyp,
+                "ref": ref
+            }
+            data.append(data_point)
+        model_output = comet_calculation_model.predict(data, batch_size=16, gpus=1, progress_bar=False)
+        _, system_score = model_output.scores, model_output.system_score
+        return nll_loss, system_score
+
+
     if eval_bleu:
         EVAL_BLEU_ORDER = 4
         logging_output = {}
@@ -199,9 +255,11 @@ class Aggrevate(FairseqCriterion):
             expert_action_chosen,
             sample_action_prob,
             eval_bleu,
+            eval_comet,
             eval_bleu_detok,
             sample_from_distribution,
             ter,
+            comet,
             ignore_prefix_size=0,
             report_accuracy=False,
     ):
@@ -221,10 +279,17 @@ class Aggrevate(FairseqCriterion):
         self.expert_action_chosen = expert_action_chosen
         self.eval_bleu = eval_bleu
         self.metric_ter = ter
-        if self.metric_ter:
+        self.metric_comet = comet
+        self.eval_comet = eval_comet
+        if self.metric_ter or self.metric_comet:
             self.metric_bleu = False
         else:
             self.metric_bleu = True
+        if self.metric_comet:
+            # self.model_path = download_model("wmt22-comet-da")        # use on bwcluster
+            self.model_path = download_model("eamt22-cometinho-da")
+        else:
+            self.model_path = None
         self.sample_from_distribution = sample_from_distribution
         if self.expert_action_chosen:
             self.uniform_sampling = False
@@ -238,7 +303,7 @@ class Aggrevate(FairseqCriterion):
         self.sample_action_prob = sample_action_prob
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         # include translation task attributes here to calculate BLEU on validation set
-        if self.eval_bleu:
+        if self.eval_bleu or self.eval_comet:
             self.tokenizer = encoders.build_tokenizer(
                 Namespace(tokenizer=eval_bleu_detok)
             )
@@ -285,6 +350,19 @@ class Aggrevate(FairseqCriterion):
                     "bleu_complete_student_continuation": bleu_for_complete_student_hypos.data,
                     "bleu_complete_expert_continuation": bleu_for_complete_expert.data
                 }
+            elif self.metric_comet:
+                logging_output = {
+                    "loss": loss.data,
+                    "nll_loss": nll_loss.data,
+                    "ntokens": sample["ntokens"],
+                    "nsentences": sample["target"].size(0),
+                    "sample_size": sample["ntokens"],
+                    "comet": logged_bleu,
+                    "indicator_sum": indicator_sum,
+                    "comet_diff": bleu_diff.data,
+                    "comet_complete_student_continuation": bleu_for_complete_student_hypos.data,
+                    "comet_complete_expert_continuation": bleu_for_complete_expert.data
+                }
             else:
                 logging_output = {
                     "loss": loss.data,
@@ -315,6 +393,18 @@ class Aggrevate(FairseqCriterion):
                     "bleu_complete_student_continuation": bleu_for_complete_student_hypos.data,
                     "bleu_complete_expert_continuation": bleu_for_complete_expert.data
                 }
+            elif self.metric_comet:
+                logging_output = {
+                    "loss": loss.data,
+                    "comet_diff": bleu_diff.data,
+                    "ntokens": sample["ntokens"],
+                    "nsentences": sample["target"].size(0),
+                    "sample_size": sample["ntokens"],
+                    "indicator_sum": indicator_sum,
+                    "comet_complete_student_continuation": bleu_for_complete_student_hypos.data,
+                    "comet_complete_expert_continuation": bleu_for_complete_expert.data
+                }
+
             else:
                 logging_output = {
                     "loss": loss.data,
@@ -347,18 +437,32 @@ class Aggrevate(FairseqCriterion):
     def compute_loss(self, model, net_output, sample, reduce=True, valid=False):
         if valid:
             source_text, _ = self.transform_source_tokens_into_expert_voc(sample)
-            sample["net_input"].pop("src_text", None)
+            source_text_normal = sample["net_input"].pop("src_text", None)
             lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
-            nll_loss, logged_bleu = valid_loss(lprobs, target, sample, model, self.expert_vocab_tgt, self.eval_bleu,
-                                               self.ignore_prefix_size, reduce=reduce, tokenizer=self.tokenizer)
+            if source_text_normal:
+                nll_loss, logged_bleu = valid_loss(lprobs, target, sample, model, self.expert_vocab_tgt, eval_bleu=self.eval_bleu,
+                                                   ignore_index=self.ignore_prefix_size, reduce=reduce, tokenizer=self.tokenizer, eval_comet=self.eval_comet, source_dict=self.expert_vocab_src, comet_calculation_model_path=self.model_path, source_text=source_text_normal)
+            else:
+                nll_loss, logged_bleu = valid_loss(lprobs, target, sample, model, self.expert_vocab_tgt, eval_bleu=self.eval_bleu,
+                                                   ignore_index=self.ignore_prefix_size, reduce=reduce, tokenizer=self.tokenizer, eval_comet=self.eval_comet, source_dict=self.expert_vocab_src, comet_calculation_model_path=self.model_path, source_text=source_text)
             expert_input, indices, ats, hypos_up_to_t = self.get_student_predictions_and_pass_to_expert(model, sample, source_text)
             expert_output_samples = self.get_expert_output(sample, source_text, expert_input)
-            bleu_diff, student_actions_probs, indicator, complete_student_bleu, complete_expert_bleu = self.calculate_rewards(
-                sample, model,
-                expert_output_samples,
-                hypos_up_to_t,
-                expert_input, indices,
-                ats)
+            if source_text_normal:
+                bleu_diff, student_actions_probs, indicator, complete_student_bleu, complete_expert_bleu = self.calculate_rewards(
+                    sample, model,
+                    expert_output_samples,
+                    hypos_up_to_t,
+                    expert_input, indices,
+                    ats,
+                    source_text_normal)
+            else:
+                bleu_diff, student_actions_probs, indicator, complete_student_bleu, complete_expert_bleu = self.calculate_rewards(
+                    sample, model,
+                    expert_output_samples,
+                    hypos_up_to_t,
+                    expert_input, indices,
+                    ats,
+                    source_text)
             loss, bleu_diff_log, indicator = loss_calculation(
                 bleu_diff, student_actions_probs, indicator
             )
@@ -371,12 +475,23 @@ class Aggrevate(FairseqCriterion):
                                                                                                             source_text)
                 expert_output_samples = self.get_expert_output(sample, source_text, expert_input)
             model.train()  # call to SequenceGenerator sets model to eval mode, set model back to train
-            bleu_diff, student_actions_probs, indicator, complete_student_bleu, complete_expert_bleu = self.calculate_rewards(
-                sample, model,
-                expert_output_samples,
-                hypos_up_to_t,
-                expert_input, indices,
-                ats)
+            source_text = sample["net_input"].pop("src_text", None)
+            if source_text:
+                bleu_diff, student_actions_probs, indicator, complete_student_bleu, complete_expert_bleu = self.calculate_rewards(
+                    sample, model,
+                    expert_output_samples,
+                    hypos_up_to_t,
+                    expert_input, indices,
+                    ats,
+                    source_text)
+            else:
+                bleu_diff, student_actions_probs, indicator, complete_student_bleu, complete_expert_bleu = self.calculate_rewards(
+                    sample, model,
+                    expert_output_samples,
+                    hypos_up_to_t,
+                    expert_input, indices,
+                    ats,
+                    sample["net_input"]["src_tokens"])
             loss, bleu_diff_log, indicator = loss_calculation(
                 bleu_diff, student_actions_probs, indicator
             )
@@ -408,7 +523,11 @@ class Aggrevate(FairseqCriterion):
         indicator_sum = sum(log.get("indicator_sum", 0) for log in logging_outputs)
         ter_student_complete = sum(log.get("ter_complete_student_continuation", 0) for log in logging_outputs)
         ter_expert_complete = sum(log.get("ter_complete_expert_continuation", 0) for log in logging_outputs)
-
+        comet_diff = sum(log.get("comet_diff", 0) for log in logging_outputs)
+        indicator_sum = sum(log.get("indicator_sum", 0) for log in logging_outputs)
+        comet_student_complete = sum(log.get("comet_complete_student_continuation", 0) for log in logging_outputs)
+        comet_expert_complete = sum(log.get("comet_complete_expert_continuation", 0) for log in logging_outputs)
+        comet_student = sum(log.get("comet", 0) for log in logging_outputs)
         metrics.log_scalar(
             "loss", loss_sum / nsentences, nsentences, round=3
         )
@@ -451,6 +570,27 @@ class Aggrevate(FairseqCriterion):
                 )
                 metrics.log_scalar(
                     "1-ter: complete_expert_continuation_no_zeros", ter_expert_complete / indicator_sum, nsentences, round=3
+            )
+        elif "comet_diff" in logging_outputs[0].keys():
+
+            metrics.log_scalar(
+                "comet_diff", comet_diff / nsentences, nsentences, round=3
+            )
+            metrics.log_scalar(
+                "comet_complete_student_continuation",  comet_student_complete / nsentences, nsentences, round=3
+            )
+            metrics.log_scalar(
+                "comet_complete_expert_continuation",  comet_expert_complete / nsentences, nsentences, round=3
+            )
+            if indicator_sum > 0:
+                metrics.log_scalar(
+                    "comet diff_no_zeros", comet_diff / indicator_sum, nsentences, round=3
+                )
+                metrics.log_scalar(
+                    "comet complete_student_continuation_no_zeros", comet_student_complete / indicator_sum, nsentences, round=3
+                )
+                metrics.log_scalar(
+                    "comet complete_expert_continuation_no_zeros", comet_expert_complete / indicator_sum, nsentences, round=3
             )
         metrics.log_scalar(
             "indicator_percentage", indicator_sum / nsentences, nsentences, round=3
@@ -558,6 +698,31 @@ class Aggrevate(FairseqCriterion):
 
             ter_scores.append(1 - ter_score.score)
         return ter_scores
+
+    
+    def calculate_comet(self, target, hypos, source_text):
+        data = []
+        comet_calculation_model = load_from_checkpoint(self.model_path)
+
+        for i, hypo in enumerate(hypos):
+            ### slow  - not happy with this###
+            ref = self.tokenizer.decode(self.dict.string(utils.strip_pad(target[i, :], self.padding_idx).cpu(), unk_string="UNKNOWNTOKENINREF",
+                  bpe_symbol="fastBPE"))
+            # only top scoring hypothesis is considered
+            hyp = self.tokenizer.decode(self.dict.string(hypo[0]["tokens"].int().cpu(), unk_string="UNKNOWNTOKENINHYP", bpe_symbol="fastBPE"))
+            if isinstance(source_text[i], str):
+                src = self.tokenizer.decode(source_text[i])
+            else:
+                src = self.tokenizer.decode(self.expert_vocab_src.string(utils.strip_pad(source_text[i, :], self.padding_idx).cpu() ,bpe_symbol="fastBPE"))
+            data_point = {
+                "src": src,
+                "mt": hyp,
+                "ref": ref
+            }
+            data.append(data_point)
+        model_output = comet_calculation_model.predict(data, batch_size=16, gpus=1, progress_bar=False)
+        seg_scores, system_score = model_output.scores, model_output.system_score
+        return seg_scores
 
     def get_student_predictions_and_pass_to_expert(self, model, sample, source_text):
         hypo_including_t = []
@@ -708,9 +873,8 @@ class Aggrevate(FairseqCriterion):
         )
         return expert_output
 
-    def calculate_rewards(self, sample, model, expert_output_samples, hypos_up_to_t,  hypos_to_t, indices, ats):
+    def calculate_rewards(self, sample, model, expert_output_samples, hypos_up_to_t,  hypos_to_t, indices, ats, source_text):
         sample["net_input"]["prev_output_tokens"] = hypos_up_to_t
-        sample["net_input"].pop("src_text", None)
         net_output = model(**sample["net_input"])
         eos_pad = torch.tensor([self.dict.eos() for _ in range(hypos_to_t.shape[0])], device=self.device).view(-1, 1)
         sample["net_input"]["prev_output_tokens"] = torch.cat((eos_pad, hypos_to_t), dim=1).to(self.device)
@@ -740,6 +904,11 @@ class Aggrevate(FairseqCriterion):
             qt = torch.tensor(self.calculate_inverse_ter(targets, student_hypos), device=self.device)
             q_t_T = torch.tensor(self.calculate_inverse_ter(targets, complete_student_hypo), device=self.device)
             rtg = self.calculate_inverse_ter(targets, expert_output_samples)
+            r_e = torch.tensor(rtg, device=self.device)
+        elif self.metric_comet:
+            qt = torch.tensor(self.calculate_comet(targets, student_hypos, source_text), device=self.device)
+            q_t_T = torch.tensor(self.calculate_comet(targets, complete_student_hypo, source_text), device=self.device)
+            rtg = self.calculate_comet(targets, expert_output_samples, source_text)
             r_e = torch.tensor(rtg, device=self.device)
         if self.complete_indicator:
             indicator = [r_e > q_t_T][0]
