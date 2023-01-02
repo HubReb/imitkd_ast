@@ -543,19 +543,18 @@ class Aggrevate(FairseqCriterion):
         for i, hypo in enumerate(hypos):
             ref = utils.strip_pad(target[i, :], self.padding_idx).cpu()
             ### slow  - not happy with this###
-            ref = self.tokenizer.decode(self.dict.string(utils.strip_pad(target[i, :], self.padding_idx).cpu(), unk_string="UNKNOWNTOKENINREF",
-                  bpe_symbol="fastBPE"))
+            # ref = self.tokenizer.decode(self.dict.string(utils.strip_pad(target[i, :], self.padding_idx).cpu(), unk_string="UNKNOWNTOKENINREF",
+                  # bpe_symbol="fastBPE"))
             # only top scoring hypothesis is considered
-            hyp = self.tokenizer.decode(self.dict.string(hypo[0]["tokens"].int().cpu(), unk_string="UNKNOWNTOKENINHYP", bpe_symbol="fastBPE"))
-            bleu = sacrebleu.sentence_bleu(hyp, [ref], smooth_method="floor", smooth_value=0.1)     # not smoothing sets BLEU too low, smoothing exp. sets it far too high
-            # self._scorer.score(utils.strip_pad(target[i, :], self.padding_idx).cpu()  , hypo[0]['tokens'].int().cpu(), order=self.bleu_ngramms)
+            # hyp = self.tokenizer.decode(self.dict.string(hypo[0]["tokens"].int().cpu(), unk_string="UNKNOWNTOKENINHYP", bpe_symbol="fastBPE"))
+            # bleu = sacrebleu.sentence_bleu(hyp, [ref], smooth_method="floor", smooth_value=0.1)     # not smoothing sets BLEU too low, smoothing exp. sets it far too high
 
             ### decreases training time by ca. 1/3, not as precise but works just as good -> useful despite drawbacks ###
-            #if not hypo[0]['tokens'].numel():
-                # bleu_scores.append(0)
-            # else:
-                # bleu_scores.append(self.score(ref, hypo[0]['tokens'].int().cpu()))
-            bleu_scores.append(bleu.score)
+            if not hypo[0]['tokens'].numel():
+                bleu_scores.append(0)
+            else:
+                bleu_scores.append(self.score(ref, hypo[0]['tokens'].int().cpu()))
+            # bleu_scores.append(bleu.score)
         return bleu_scores
 
     def get_student_predictions_and_pass_to_expert(self, model, sample, source_text):
