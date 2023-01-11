@@ -216,7 +216,7 @@ class ImitKD(FairseqCriterion):
             prev_output_tokens = sample["net_input"]["prev_output_tokens"].data.tolist()
             sample["net_input"].pop("src_text")
             max_length = max([len(i) for i in prev_output_tokens])  # let's avoid blowing up the GPU RAM, shall we?
-            asr_generator = SequenceGenerator([self.asr_model], self.dict, beam_size=1, max_len=max_length).cuda()
+            asr_generator = SequenceGenerator([self.asr_model], self.expert_vocab_src, beam_size=1, max_len=max_length).cuda()
             transcription_hypos = asr_generator._generate(sample)
             transcriptions = []
             lengths = []
