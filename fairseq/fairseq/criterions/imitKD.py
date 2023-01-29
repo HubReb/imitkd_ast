@@ -226,6 +226,8 @@ class ImitKD(FairseqCriterion):
             self.tokenizer = encoders.build_tokenizer(
                 Namespace(tokenizer=eval_bleu_detok)
             )
+        else:
+            self.tokenizer = None
 
 
     def forward(self, model, sample, reduce=True, valid=False):
