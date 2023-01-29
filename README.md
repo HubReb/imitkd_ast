@@ -275,7 +275,7 @@ Results for the CoVoST 2 dataset are listed below.
 | on text data: CoVoST 2 NMT transformer: NLL (8K BPE)             | -                 | 29.6    |
 | on text data: WMT19 transformer: NLL (32K BPE)                   | 40.2              | 38.5    |
 | AST transformer: NLL (8K BPE)                                    | 20.0              | 15.8    |
-| AST transformer: KD (8K BPE)                                     | 16.7              | 13.9    |
+| AST transformer: KD (8K BPE)                                     | 17.0              | 14.2    |
 | AST transformer: KDT (8K BPE, frozen transcripts)                | 15.8              | 12.9    |
 | AST transformer: KDT (8K BPE, on-the-fly transcripts)            | 22.1              | 18.2    |
 
