@@ -289,7 +289,6 @@ Instead of phasing out the references as done in ImitKD(T), it is also possible 
 
 $$
 L = \beta \cdot L_{KD} + (1 - \beta) \cdot L_{ImitKD} 
-
 $$
 
 with
