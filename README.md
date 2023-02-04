@@ -292,9 +292,11 @@ L = \beta \cdot L_{KD} + (1 - \beta) \cdot L_{ImitKD}
 $$
 
 with
+
 $$
 \beta \rightarrow 0
 $$
+
 and using the Imitation-based loss only to correct the student hypotheses. 
 This leads to better results, but requires more GPU VRAM.
 
