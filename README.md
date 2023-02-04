@@ -294,9 +294,9 @@ $$
 
 with
 $$
-\beta \rightarrow 0 and L_{ImitKD} using only the student hypotheses
+\beta \rightarrow 0
 $$
-
+and using the Imitation-based loss only to correct the student hypotheses. 
 This leads to better results, but requires more GPU VRAM.
 
 
