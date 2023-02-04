@@ -294,8 +294,9 @@ $$
 
 with
 $$
-\beta \rightarrow 0 \text{and } L_{ImitKD} \text{using only the student hypotheses} 
+\beta \rightarrow 0 and L_{ImitKD} using only the student hypotheses
 $$
+
 This leads to better results, but requires more GPU VRAM.
 
 
