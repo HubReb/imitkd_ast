@@ -289,9 +289,13 @@ Instead of phasing out the references as done in ImitKD(T), it is also possible 
 
 $$
 L = \beta \cdot L_{KD} + (1 - \beta) \cdot L_{ImitKD} 
+
 $$
 
-with $$L_{ImitKD} $$ using only the student hypotheses.
+with
+$$
+\beta \rightarrow 0 \text{and } L_{ImitKD} \text{using only the student hypotheses} 
+$$
 This leads to better results, but requires more GPU VRAM.
 
 
