@@ -28,13 +28,13 @@ In order for ImitKD to work, several changes were made to the fairseq framework:
 
 The repo contains an `environment.yml` that specifies the required dependencies and python-version.
 Simply create a new conda environment from the environment.yml by running:
-```
+```bash
 conda env create -f environment.yml
 ```
 Note that this process may take several minutes.
 Then activate the environment, change into the fairseq directory and install fairseq:
 
-```
+```bash
 conda activate train
 cd fairseq
 pip install .
@@ -42,7 +42,7 @@ pip install .
 
 
 If you want to develop locally without reinstalling fairseq after every change run:
-```
+```bash
 pip install --editable .
 ```
 
@@ -52,12 +52,12 @@ Download and compile [fastBPE](https://github.com/glample/fastBPE).
 
 ## Datasets
 
-| Dataset                                              | hours of speech    | total number of samples |
-| :--------------------------------------------------- | -----------------: | ----------------------: |
-| MUST-C (en-de)                                       | 408                | 234K                    |
-| COVOST2 (en-de)                                      | 430                | 319K                    |
-| Europarl-ST (en-de)                                  | 83                 | 35.5                    |
-| Europarl-ST (en-de) + Europarl-ST (en-de) noisy      | 173                | 72.4K                   |
+| Dataset                                         | hours of speech | total number of samples |
+|:------------------------------------------------|----------------:|------------------------:|
+| MUST-C (en-de)                                  |             408 |                    234K |
+| COVOST2 (en-de)                                 |             430 |                    319K |
+| Europarl-ST (en-de)                             |              83 |                    35.5 |
+| Europarl-ST (en-de) + Europarl-ST (en-de) noisy |             173 |                   72.4K |
 
 
 
@@ -76,17 +76,17 @@ For COVOST2 and MUST-C:
 2. Process the extracted text data the same you did for your NMT expert, e.g. by adapting [prepare-rest.sh](fairseq/examples/speech_to_text/prepare-rest.sh).
 3. Rerun `python get_source_text.py python -m ${MUSTC_DATA}/en-de/ -c ${COVOST_DATA}/en/`
 4. (Optional) The source transcripts and translations are extracted and processed during the above step. To  generate the binarized files run 
-```
+```bash
 fairseq-preprocess --source-lang en --target-lang de     --trainpref ${PROCESSED_DATA}/train --validpref ${PROCESSED_DATA}/dev --testpref ${PROCESSED_DATA}/test  --destdir ${BINARIZED_DATA_DIR}  --workers 21 --srcdict ${WMT19_TRANSFORMERS_DICTIONARY}  --joined-dictionary
 ```
 5. (Optional) Generate the translations of the gold transcripts with the WMT19 transformer to use sequence-level knowledge distillation later on._NOTE_: This may take several minutes up to 2 hours, depending on your hardware.
-```
+```bash
 fairseq-generate ${BINARIZED_DATA_DIR}\
   --gen-subset train  --path ${WMT19_TRANSFORMER_DIRECTORY}/model1.pt  --max-tokens 5000 --beam 5 --remove-bpe --sacrebleu  > ${OUTPUT_FILE}
 ```
 6. Run `python get_source_text.py` again
 7. (Optional) Run [create_wmt19_generated_dataset.py](create_wmt19_generated_dataset.py) to create the dataset consisting of the original transcripts to WMT19 translations of the transcripts:
-```
+```bash
 python create_wmt19_generated_dataset.py -o ${OUTPUT_FILE} -d {PROCESSED_SPEECH_TO_TEXT_DATASET_FILE}
 ```
 8. Adapt the configuration files (`config_{task}.yaml`) to point to your NMT expert's vocabulary and BPE. The configuration files are in `{MUSTC_DATA}/en-de/` and  `${COVOST_DATA}/en/`.
@@ -97,7 +97,7 @@ python create_wmt19_generated_dataset.py -o ${OUTPUT_FILE} -d {PROCESSED_SPEECH_
 Model training and evaluation is done as is specified in the fairseq framework.
 For instance, to train a small AST transformer model with `imit_kd` and a NMT expert run:
 
-```
+```bash
 fairseq-train ${COVOST_ROOT}/en --config-yaml config_st_en_de.yaml --train-subset train_processed --valid-subset dev_processed  --num-workers 8 --max-tokens 50000  --max-update 30000   --task speech_to_text --criterion imit_kd --report-accuracy --arch s2t_transformer_s  \
 --optimizer adam --lr 0.002 --lr-scheduler inverse_sqrt --seed 1 --clip-norm 10.0 --expert ${PATH_TO_EXPERT_MODEL} --expert-vocab-tgt ${PATH_TO_EXPERT_MODEL_DICTIONARY}  --expert-vocab-src ${PATH_TO_EXPERT_MODEL_SRC_DICTIONARY} --path  ${PATH_TO_EXPERT_MODEL_DIRECTORY} \
  --save-dir ${ST_SAVE_DIR}  --bpe-codes ${PATH_TO_BPE} --warmup-updates 10000 --clip-norm 10.0 --seed 1 --update-freq 8  --patience 10 --load-pretrained-encoder-from ${ASR_MODEL} --encoder-freezing-updates 1000`
@@ -109,7 +109,7 @@ __**Important**: Training such a model requires at least 40 GB of RAM and a GPU 
 
 To use AggreVaTe , e. g. the above transformer or a ImitKD transformer, use:
 
-```
+```bash
 fairseq-train ${COVOST_ROOT} \
   --config-yaml config_test_wmt19.yaml --train-subset train_processed  --valid-subset dev_processed --finetune-from-model ${pre-trained_s2t_transformer} \
   --save-dir ${ST_SAVE_DIR} --num-workers 8 --max-tokens 50000  --max-epoch 50 --update-freq 8\
@@ -145,11 +145,11 @@ Omit ` --best-checkpoint-metric bleu --maximize-best-checkpoint-metric --eval-bl
 The best way to run experiments with generated transcripts is to:
 1. use the ASR model to transcribe the speech data as demonstrated in the speech-to-text module examples
 2. extract the generated hypotheses with
-```
+```bash
 python create_wmt19_generated_dataset.py -d ${speech-to-text dataset} -a ${LOGGED_ASR_MODEL_OUTPUT_ON_DATASET}
 ```
 3. use the NMT expert model to translate those transcripts if you want to use generated target translations
-```
+```bash
 ${FASTBPE}/fast applybpe ${DATADIR}/output.en ${DATADIR}/${EXTRACTED_TRANSCRIPTS} ${BPECODES} ${WMT19_VOCAB}
 
 # binarize data - easiest to simply use the already extracted references here
@@ -158,7 +158,7 @@ fairseq-preprocess --source-lang en --target-lang de     --trainpref ${DATA_DIR}
 fairseq-generate ${BINARIZED_DATA_DIR}  --gen-subset train --path ${WMT19_TRANSFORMER_DIRECTORY}/model1.pt  --batch-size 32 --beam 5 --remove-bpe --sacrebleu  > ${LOG_FILE_TRANSCRIPT_TRANSLATIONS}
 ```
 4. run `create_wmt19_generated_dataset.py` to create a new dataset of generated trancripts:
-```
+```bash
     python create_wmt19_generated_dataset.py -o ${fairseq-generate log file of NMT expert's translations} -a ${fairseq-generate log file of ASR model's transcripts} -d ${AST dataset file}
 ```
 5. use the new dataset just like the original datasets 
@@ -177,54 +177,54 @@ These are given as KDT and ImitKD.T
 
 ### MUST-C
 
-| MODEL: Training method                               | dev               | test    |
-| :--------------------------------------------------- | ----------------: | ------: |
-| AST RNN: NLL                                         | 14.6              | 14.1    |
-| AST RNN: KD                                          | 17.9              | 17.2    |
-| AST RNN: KDT                                         | 16.9              | 15.9    |
-| AST RNN: ImitKD-full                                 | 15.7              | 14.9    |
-| AST RNN: ImitKDT-full                                | 16.3              | 15.1    |
-| AST transformer: NLL                                 | 19.5              | 19.4    |
-| AST transformer: KD                                  | 22.2              | 22.3    |
-| AST transformer: KDT                                 | 22.5              | 22.6    |
-| AST transformer: ImitKD-full                         | 23.2              | 23.3    |
-| AST transformer: ImitKDT-full                        | 23.5              | 23.5    |
+| MODEL: Training method        |  dev | test |
+|:------------------------------|-----:|-----:|
+| AST RNN: NLL                  | 14.6 | 14.1 |
+| AST RNN: KD                   | 17.9 | 17.2 |
+| AST RNN: KDT                  | 16.9 | 15.9 |
+| AST RNN: ImitKD-full          | 15.7 | 14.9 |
+| AST RNN: ImitKDT-full         | 16.3 | 15.1 |
+| AST transformer: NLL          | 19.5 | 19.4 |
+| AST transformer: KD           | 22.2 | 22.3 |
+| AST transformer: KDT          | 22.5 | 22.6 |
+| AST transformer: ImitKD-full  | 23.2 | 23.3 |
+| AST transformer: ImitKDT-full | 23.5 | 23.5 |
 
 ### COVOST2
 
-| MODEL: Training method                               | dev               | test    |
-| :--------------------------------------------------- | ----------------: | ------: |
-| AST RNN: NLL                                         | 13.6              | 10.0    |
-| AST RNN: KD                                          | 14.6              | 11.1    |
-| AST RNN: KDT                                         | 14.1              | 10.6    |
-| AST RNN: ImitKD-full                                 | 13.1              | 10.1    |
-| AST RNN: ImitKDT-full                                | 12.8              | 9.7     |
-| AST transformer: NLL                                 | 18.4              | 14.2    |
-| AST transformer: KD                                  | 21.3              | 17.7    |
-| AST transformer: KDT                                 | 21.7              | 18.0    |
-| AST transformer: ImitKD-full                         | 21.8              | 18.4    |
-| AST transformer: ImitKDT-full                        | 21.8              | 18.5    |
+| MODEL: Training method        |  dev | test |
+|:------------------------------|-----:|-----:|
+| AST RNN: NLL                  | 13.6 | 10.0 |
+| AST RNN: KD                   | 14.6 | 11.1 |
+| AST RNN: KDT                  | 14.1 | 10.6 |
+| AST RNN: ImitKD-full          | 13.1 | 10.1 |
+| AST RNN: ImitKDT-full         | 12.8 |  9.7 |
+| AST transformer: NLL          | 18.4 | 14.2 |
+| AST transformer: KD           | 21.3 | 17.7 |
+| AST transformer: KDT          | 21.7 | 18.0 |
+| AST transformer: ImitKD-full  | 21.8 | 18.4 |
+| AST transformer: ImitKDT-full | 21.8 | 18.5 |
 
 ### Europarl-ST: clean training set
 
-| MODEL: Training method                               | dev               | test    |
-| :--------------------------------------------------- | ----------------: | ------: |
-| AST RNN: NLL                                         | 13.8              | 14.4    |
-| AST RNN: KD                                          | 17.4              | 17.8    |
-| AST RNN: KDT                                         | 17.5              | 18.0    |
-| AST RNN: ImitKD-full                                 | 17.0              | 17.1    |
-| AST RNN: ImitKDT-full                                | 17.0              | 17.0    |
+| MODEL: Training method |  dev | test |
+|:-----------------------|-----:|-----:|
+| AST RNN: NLL           | 13.8 | 14.4 |
+| AST RNN: KD            | 17.4 | 17.8 |
+| AST RNN: KDT           | 17.5 | 18.0 |
+| AST RNN: ImitKD-full   | 17.0 | 17.1 |
+| AST RNN: ImitKDT-full  | 17.0 | 17.0 |
 
 
 ### Europarl-ST: clean+noisy training set
 
-| MODEL: Training method                               | dev               | test    |
-| :--------------------------------------------------- | ----------------: | ------: |
-| AST RNN: NLL                                         | 17.5              | 17.3    |
-| AST RNN: KD                                          | 11.5              | 12.0    |
-| AST RNN: KDT                                         | 18.3              | 18.2    |
-| AST RNN: ImitKD-full                                 | 12.0              | 12.3    |
-| AST RNN: ImitKDT-full                                | 16.6              | 16.6    |
+| MODEL: Training method |  dev | test |
+|:-----------------------|-----:|-----:|
+| AST RNN: NLL           | 17.5 | 17.3 |
+| AST RNN: KD            | 11.5 | 12.0 |
+| AST RNN: KDT           | 18.3 | 18.2 |
+| AST RNN: ImitKD-full   | 12.0 | 12.3 |
+| AST RNN: ImitKDT-full  | 16.6 | 16.6 |
 
 
 
@@ -238,21 +238,21 @@ The scripts to detokenize the translations are provided.
 __Important__: fairseq requires an older sacrebleu version than fairseq. The easiest method is to create a second conda environment for the evaluation of results.
 The configuration is given in eval_environment.yml.
 Simply run:
-```
+```bash
 conda env create -f environment.yml
 ```
 
 Create a file that list the logs created by running fairseq-generate (*important*: Do not run fairseq-generate with the --quiet flag. If you do, fairseq-generates only saves the detokenized BLEU score to the log file).
 Write each file name to a new line, e.g.:
 
-```
+```bash
 baseline_mustc_nll.log
 baseline_mustc_kd.log
 ```
 
 Then run 
 
-```
+```bash
 bash eval_script.sh ${name of file that contains the list of file names}
 ```
 
@@ -273,23 +273,26 @@ Thus, it allows a more effective KD than can be done with the original data.
 Results for the CoVoST 2 dataset are listed below.
 
 
-| MODEL: Training method                                           | dev               | test    |
-| :--------------------------------------------------------------- | ----------------: | ------: |
-| on text data: CoVoST 2 NMT transformer: NLL (8K BPE)             | -                 | 29.6    |
-| on text data: WMT19 transformer: NLL (32K BPE)                   | 40.2              | 38.5    |
-| AST transformer: NLL (8K BPE)                                    | 20.0              | 15.8    |
-| AST transformer: KD (8K BPE)                                     | 17.0              | 14.2    |
-| AST transformer: KDT (8K BPE, frozen transcripts)                | 15.8              | 12.9    |
-| AST transformer: KDT (8K BPE, on-the-fly transcripts)            | 22.1              | 18.2    |
+| MODEL: Training method                                |  dev | test |
+|:------------------------------------------------------|-----:|-----:|
+| on text data: CoVoST 2 NMT transformer: NLL (8K BPE)  |    - | 29.6 |
+| on text data: WMT19 transformer: NLL (32K BPE)        | 40.2 | 38.5 |
+| AST transformer: NLL (8K BPE)                         | 20.0 | 15.8 |
+| AST transformer: KD (8K BPE)                          | 17.0 | 14.2 |
+| AST transformer: KDT (8K BPE, frozen transcripts)     | 15.8 | 12.9 |
+| AST transformer: KDT (8K BPE, on-the-fly transcripts) | 22.1 | 18.2 |
 
 
 ## A word on phasing out the reference translations
 
 Instead of phasing out the references as done in ImitKD(T), it is also possible to interpolate the two losses by using a weighted sum for ImitKD(T):
 
-Loss = beta \* loss w.r.t. reference + (1 - beta) \* loss with respect to the student hypothesis
+$$
+L = \beta \cdot L_{KD} + (1 - \beta) \cdot L_{ImitKD} 
+$$
 
-This leads to (slightly) better results, but requires more GPU VRAM.
+with $$L_{ImitKD} $$ using only the student hypotheses.
+This leads to better results, but requires more GPU VRAM.
 
 
 ## Conclusions
