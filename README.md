@@ -271,34 +271,30 @@ But it allows the usage of a far smaller, _worse_ performing  expert with a far 
 
 Thus, it allows a more effective KD than can be done with the original data.
 Results for the CoVoST 2 dataset are listed below.
+Note that _no_ hyperparameter tuning was done for these results.
 
 
-| MODEL: Training method                                |  dev | test |
-|:------------------------------------------------------|-----:|-----:|
-| on text data: CoVoST 2 NMT transformer: NLL (8K BPE)  |    - | 29.6 |
-| on text data: WMT19 transformer: NLL (32K BPE)        | 40.2 | 38.5 |
-| AST transformer: NLL (8K BPE)                         | 20.0 | 15.8 |
-| AST transformer: KD (8K BPE)                          | 17.0 | 14.2 |
-| AST transformer: KDT (8K BPE, frozen transcripts)     | 15.8 | 12.9 |
-| AST transformer: KDT (8K BPE, on-the-fly transcripts) | 22.1 | 18.2 |
+### CoVoST 2
+| MODEL: Training method                                | en-de | fr-en |
+|-------------------------------------------------------|------:|------:|
+| on text data: NMT transformer: NLL (8K BPE)           |  29.6 |  36.7 |
+| on text data: WMT19 transformer: NLL (32K BPE)        |  38.5 |     - |
+| AST transformer: NLL (8K BPE)                         |  15.8 |  25.3 |
+| AST transformer: KD (8K BPE)                          |  14.2 |   3.1 |
+| AST transformer: KDT (8K BPE, frozen transcripts)     |  12.9 |     - |
+| AST transformer: KDT (8K BPE, on-the-fly transcripts) |  18.2 |  27.6 |
+| AST transformer: ImitKD (8K BPE)                      |  14.3 |   2.6 |
+| AST transformer: ImitKDT (8K BPE)                     |  16.7 |  15.1 |
 
 
-## A word on phasing out the reference translations
+### MuST-C en-de
+| MODEL: Training method                                | tst-COMMON |
+|-------------------------------------------------------|-----------:|
+| on text data: NMT transformer: NLL (8K BPE)           |       29.4 |
+| AST transformer: NLL (8K BPE)                         |       21.7 |
+| AST transformer: KD (8K BPE)                          |       15.5 |
+| AST transformer: KDT (8K BPE, on-the-fly transcripts) |       22.5 |
 
-Instead of phasing out the references as done in ImitKD(T), it is also possible to interpolate the two losses by using a weighted sum for ImitKD(T):
-
-$$
-L = \beta \cdot L_{KD} + (1 - \beta) \cdot L_{ImitKD} 
-$$
-
-with
-
-$$
-\beta \rightarrow 0
-$$
-
-and using the Imitation-based loss only to correct the student hypotheses. 
-This leads to better results, but requires more GPU VRAM.
 
 
 ## Conclusions
